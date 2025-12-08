@@ -47,7 +47,12 @@ const toQueryString = (params = {}) => {
   return `?${query.toString()}`;
 };
 
-export const sendDirectMessageApi = ({ from, to, message }) => {
+export const sendDirectMessageApi = ({
+  from,
+  to,
+  message,
+  suppressRealtime = false,
+}) => {
   if (!from || !to || !message) {
     return Promise.reject(
       new Error("from, to and message must be provided for direct messages")
@@ -64,7 +69,7 @@ export const sendDirectMessageApi = ({ from, to, message }) => {
   return jsonRequest("/chat/direct/send", {
     method: "POST",
     apiKey,
-    body: JSON.stringify({ from, to, message }),
+    body: JSON.stringify({ from, to, message, suppressRealtime }),
   });
 };
 
@@ -93,7 +98,12 @@ export const fetchDirectMessagesApi = ({
   });
 };
 
-export const sendGroupMessageApi = ({ groupId, from, message }) => {
+export const sendGroupMessageApi = ({
+  groupId,
+  from,
+  message,
+  suppressRealtime = false,
+}) => {
   if (!groupId || !from || !message) {
     return Promise.reject(
       new Error("groupId, from and message must be provided for group messages")
@@ -110,7 +120,7 @@ export const sendGroupMessageApi = ({ groupId, from, message }) => {
   return jsonRequest("/chat/group/send", {
     method: "POST",
     apiKey,
-    body: JSON.stringify({ groupId, from, message }),
+    body: JSON.stringify({ groupId, from, message, suppressRealtime }),
   });
 };
 

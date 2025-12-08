@@ -433,6 +433,11 @@ export default function ChatPage() {
       return;
     }
 
+    const socketInstance = socketRef.current ?? getSocket();
+    if (socketInstance && socketInstance.disconnected) {
+      socketInstance.connect();
+    }
+
     if (activeRoster === "group" && activeGroupId) {
       const targetGroupId = activeGroupId;
       const payload = {
@@ -449,8 +454,15 @@ export default function ChatPage() {
         ),
       }));
 
+      if (socketInstance) {
+        socketInstance.emit(GROUP_EVENTS.SEND, payload);
+      }
+
       try {
-        const response = await sendGroupMessageApi(payload);
+        const response = await sendGroupMessageApi({
+          ...payload,
+          suppressRealtime: true,
+        });
         if (response?.data) {
           setGroupMessages((prev) => ({
             ...prev,
@@ -487,8 +499,15 @@ export default function ChatPage() {
         ),
       }));
 
+      if (socketInstance) {
+        socketInstance.emit(DIRECT_EVENTS.SEND, payload);
+      }
+
       try {
-        const response = await sendDirectMessageApi(payload);
+        const response = await sendDirectMessageApi({
+          ...payload,
+          suppressRealtime: true,
+        });
         if (response?.data) {
           setDirectMessages((prev) => ({
             ...prev,
