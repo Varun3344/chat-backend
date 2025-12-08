@@ -14,6 +14,7 @@ import { swaggerSpec, swaggerUiMiddleware } from "./swagger/swagger.js";
 
 import { createServer } from "http";
 import { Server } from "socket.io";
+import detectPort from "detect-port";
 
 dotenv.config();
 
@@ -47,7 +48,7 @@ app.use("/docs", swaggerUiMiddleware.serve, swaggerUiMiddleware.setup(swaggerSpe
 
 console.log("Swagger Docs available at /docs");
 
-const PORT = process.env.PORT || 5000;
+const DEFAULT_PORT = Number(process.env.PORT) || 5000;
 
 const httpServer = createServer(app);
 
@@ -114,8 +115,25 @@ io.on("connection", (socket) => {
   });
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`Server + Socket.IO running on port ${PORT}`);
-});
+const startServer = async () => {
+  try {
+    const availablePort = await detectPort(DEFAULT_PORT);
+
+    if (availablePort !== DEFAULT_PORT) {
+      console.warn(
+        `Port ${DEFAULT_PORT} is busy, switched server to port ${availablePort}`
+      );
+    }
+
+    httpServer.listen(availablePort, () => {
+      console.log(`Server + Socket.IO running on port ${availablePort}`);
+    });
+  } catch (error) {
+    console.error("Unable to start server:", error);
+    process.exit(1);
+  }
+};
+
+startServer();
 
 export { io };
