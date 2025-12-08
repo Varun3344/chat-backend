@@ -342,6 +342,23 @@ export default function ChatPage() {
   }, [activeGroupId, currentUserId, isSocketReady]);
 
   useEffect(() => {
+    if (!isSocketReady || !currentUserId) return;
+    const instance = socketRef.current;
+    if (!instance) return;
+
+    const register = () => {
+      instance.emit("register_user", { userId: currentUserId });
+    };
+
+    register();
+    instance.on("connect", register);
+
+    return () => {
+      instance.off("connect", register);
+    };
+  }, [isSocketReady, currentUserId]);
+
+  useEffect(() => {
     if (!currentUserId || !activeContactId) return;
     let ignore = false;
 
