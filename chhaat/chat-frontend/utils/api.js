@@ -32,6 +32,21 @@ const jsonRequest = async (path, { apiKey, method = "GET", body } = {}) => {
   return payload;
 };
 
+const toQueryString = (params = {}) => {
+  const entries = Object.entries(params).filter(
+    ([, value]) => value !== undefined && value !== null && value !== ""
+  );
+
+  if (entries.length === 0) {
+    return "";
+  }
+
+  const query = new URLSearchParams();
+  entries.forEach(([key, value]) => query.append(key, value));
+
+  return `?${query.toString()}`;
+};
+
 export const sendDirectMessageApi = ({ from, to, message }) => {
   if (!from || !to || !message) {
     return Promise.reject(
@@ -53,6 +68,31 @@ export const sendDirectMessageApi = ({ from, to, message }) => {
   });
 };
 
+export const fetchDirectMessagesApi = ({
+  userA,
+  userB,
+  page = 1,
+  limit = 50,
+}) => {
+  if (!userA || !userB) {
+    return Promise.reject(
+      new Error("userA and userB must be provided to fetch direct history")
+    );
+  }
+
+  const apiKey = process.env.NEXT_PUBLIC_API_KEY_DIRECT_FETCH;
+  if (!apiKey) {
+    return Promise.reject(
+      new Error("Missing NEXT_PUBLIC_API_KEY_DIRECT_FETCH environment variable")
+    );
+  }
+
+  const query = toQueryString({ page, limit });
+  return jsonRequest(`/chat/direct/messages/${userA}/${userB}${query}`, {
+    apiKey,
+  });
+};
+
 export const sendGroupMessageApi = ({ groupId, from, message }) => {
   if (!groupId || !from || !message) {
     return Promise.reject(
@@ -71,5 +111,23 @@ export const sendGroupMessageApi = ({ groupId, from, message }) => {
     method: "POST",
     apiKey,
     body: JSON.stringify({ groupId, from, message }),
+  });
+};
+
+export const fetchGroupMessagesApi = ({ groupId, page = 1, limit = 50 }) => {
+  if (!groupId) {
+    return Promise.reject(new Error("groupId is required to fetch group history"));
+  }
+
+  const apiKey = process.env.NEXT_PUBLIC_API_KEY_GROUP;
+  if (!apiKey) {
+    return Promise.reject(
+      new Error("Missing NEXT_PUBLIC_API_KEY_GROUP environment variable")
+    );
+  }
+
+  const query = toQueryString({ page, limit });
+  return jsonRequest(`/chat/group/messages/${groupId}${query}`, {
+    apiKey,
   });
 };

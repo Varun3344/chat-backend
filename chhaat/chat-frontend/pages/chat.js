@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { USERS } from "../data/dummyData";
 import socket, { getSocket } from "../utils/socket";
-import { sendDirectMessageApi, sendGroupMessageApi } from "../utils/api";
+import {
+  sendDirectMessageApi,
+  sendGroupMessageApi,
+  fetchDirectMessagesApi,
+  fetchGroupMessagesApi,
+} from "../utils/api";
 
 const DIRECT_EVENTS = {
   JOIN: "join_direct_room",
@@ -133,6 +138,30 @@ const markMessageFailed = (history = [], tempId, errorMessage) => {
   };
 
   return next;
+};
+
+const normalizeHistoryFromApi = (records = []) =>
+  records
+    .slice()
+    .reverse()
+    .map((record) =>
+      createMessageFromPayload(record, { optimistic: false, failed: false })
+    );
+
+const mergePendingWithFetched = (existing = [], fetched = []) => {
+  if (!existing || existing.length === 0) {
+    return fetched;
+  }
+
+  const pending = existing.filter(
+    (message) => message.optimistic || message.failed
+  );
+
+  if (pending.length === 0) {
+    return fetched;
+  }
+
+  return [...fetched, ...pending];
 };
 
 export default function ChatPage() {
@@ -311,6 +340,73 @@ export default function ChatPage() {
       instance.emit(GROUP_EVENTS.LEAVE, payload);
     };
   }, [activeGroupId, currentUserId, isSocketReady]);
+
+  useEffect(() => {
+    if (!currentUserId || !activeContactId) return;
+    let ignore = false;
+
+    const loadHistory = async () => {
+      try {
+        const response = await fetchDirectMessagesApi({
+          userA: currentUserId,
+          userB: activeContactId,
+        });
+        const rawMessages = Array.isArray(response?.data) ? response.data : [];
+        const normalized = normalizeHistoryFromApi(rawMessages);
+
+        if (!ignore) {
+          setDirectMessages((prev) => ({
+            ...prev,
+            [activeContactId]: mergePendingWithFetched(
+              prev[activeContactId],
+              normalized
+            ),
+          }));
+        }
+      } catch (error) {
+        console.error("Unable to load direct history:", error);
+      }
+    };
+
+    loadHistory();
+
+    return () => {
+      ignore = true;
+    };
+  }, [currentUserId, activeContactId]);
+
+  useEffect(() => {
+    if (!currentUserId || !activeGroupId) return;
+    let ignore = false;
+
+    const loadGroupHistory = async () => {
+      try {
+        const response = await fetchGroupMessagesApi({
+          groupId: activeGroupId,
+        });
+        const rawMessages = response?.messages || response?.data || [];
+        const normalized = normalizeHistoryFromApi(rawMessages);
+
+        if (!ignore) {
+          setGroupMessages((prev) => ({
+            ...prev,
+            [activeGroupId]: mergePendingWithFetched(
+              prev[activeGroupId],
+              normalized
+            ),
+          }));
+        }
+      } catch (error) {
+        console.error("Unable to load group history:", error);
+      }
+    };
+
+    loadGroupHistory();
+
+    return () => {
+      ignore = true;
+    };
+  }, [currentUserId, activeGroupId]);
 
   const handleSendMessage = async (event) => {
     event.preventDefault();
