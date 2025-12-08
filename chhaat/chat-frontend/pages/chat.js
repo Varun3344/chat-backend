@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { USERS } from "../data/dummyData";
 import socket, { getSocket } from "../utils/socket";
+import { sendDirectMessageApi, sendGroupMessageApi } from "../utils/api";
 
 const DIRECT_EVENTS = {
   JOIN: "join_direct_room",
@@ -70,7 +71,69 @@ const createMessageFromPayload = (payload = {}, overrides = {}) => ({
     overrides.timestamp ??
     new Date().toISOString(),
   optimistic: overrides.optimistic ?? false,
+  failed: overrides.failed ?? false,
+  errorMessage: overrides.errorMessage,
 });
+
+const createTempMessageId = () =>
+  `temp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
+const mergeMessages = (history = [], incoming) => {
+  if (!incoming) return history;
+
+  if (!incoming.id) {
+    return [...history, incoming];
+  }
+
+  const index = history.findIndex((message) => message.id === incoming.id);
+
+  if (index === -1) {
+    return [...history, incoming];
+  }
+
+  const next = [...history];
+  next[index] = {
+    ...next[index],
+    ...incoming,
+    optimistic: false,
+    failed: false,
+    errorMessage: undefined,
+  };
+  return next;
+};
+
+const replaceTempMessage = (history = [], tempId, payload) => {
+  const normalized = createMessageFromPayload(payload, { optimistic: false });
+
+  if (!tempId) {
+    return mergeMessages(history, normalized);
+  }
+
+  const index = history.findIndex((message) => message.id === tempId);
+  if (index === -1) {
+    return mergeMessages(history, normalized);
+  }
+
+  const next = [...history];
+  next[index] = normalized;
+  return next;
+};
+
+const markMessageFailed = (history = [], tempId, errorMessage) => {
+  if (!tempId) return history;
+  const index = history.findIndex((message) => message.id === tempId);
+  if (index === -1) return history;
+
+  const next = [...history];
+  next[index] = {
+    ...next[index],
+    optimistic: false,
+    failed: true,
+    errorMessage,
+  };
+
+  return next;
+};
 
 export default function ChatPage() {
   const router = useRouter();
@@ -195,13 +258,10 @@ export default function ChatPage() {
         payload.from === currentUserId ? payload.to : payload.from;
       if (!peerId) return;
       const normalized = createMessageFromPayload(payload);
-      setDirectMessages((prev) => {
-        const history = prev[peerId] ?? [];
-        return {
-          ...prev,
-          [peerId]: [...history, normalized],
-        };
-      });
+      setDirectMessages((prev) => ({
+        ...prev,
+        [peerId]: mergeMessages(prev[peerId] ?? [], normalized),
+      }));
     };
 
     const handleGroupMessage = (payload) => {
@@ -211,13 +271,10 @@ export default function ChatPage() {
         return;
       }
       const normalized = createMessageFromPayload(payload);
-      setGroupMessages((prev) => {
-        const history = prev[payload.groupId] ?? [];
-        return {
-          ...prev,
-          [payload.groupId]: [...history, normalized],
-        };
-      });
+      setGroupMessages((prev) => ({
+        ...prev,
+        [payload.groupId]: mergeMessages(prev[payload.groupId] ?? [], normalized),
+      }));
     };
 
     instance.on(DIRECT_EVENTS.RECEIVE, handleDirectMessage);
@@ -255,50 +312,90 @@ export default function ChatPage() {
     };
   }, [activeGroupId, currentUserId, isSocketReady]);
 
-  const handleSendMessage = (event) => {
+  const handleSendMessage = async (event) => {
     event.preventDefault();
     const trimmed = messageInput.trim();
-    if (!trimmed || !currentUserId || !isSocketReady) {
+    if (!trimmed || !currentUserId) {
       setMessageInput("");
       return;
     }
-    const instance = socketRef.current;
-    if (!instance) return;
 
     if (activeRoster === "group" && activeGroupId) {
+      const targetGroupId = activeGroupId;
       const payload = {
-        groupId: activeGroupId,
+        groupId: targetGroupId,
         from: currentUserId,
         message: trimmed,
       };
-      setGroupMessages((prev) => {
-        const history = prev[activeGroupId] ?? [];
-        return {
+      const tempId = createTempMessageId();
+      setGroupMessages((prev) => ({
+        ...prev,
+        [targetGroupId]: mergeMessages(
+          prev[targetGroupId] ?? [],
+          createMessageFromPayload(payload, { id: tempId, optimistic: true })
+        ),
+      }));
+
+      try {
+        const response = await sendGroupMessageApi(payload);
+        if (response?.data) {
+          setGroupMessages((prev) => ({
+            ...prev,
+            [targetGroupId]: replaceTempMessage(
+              prev[targetGroupId] ?? [],
+              tempId,
+              response.data
+            ),
+          }));
+        }
+      } catch (error) {
+        setGroupMessages((prev) => ({
           ...prev,
-          [activeGroupId]: [
-            ...history,
-            createMessageFromPayload(payload, { optimistic: true }),
-          ],
-        };
-      });
-      instance.emit(GROUP_EVENTS.SEND, payload);
+          [targetGroupId]: markMessageFailed(
+            prev[targetGroupId] ?? [],
+            tempId,
+            error.message || "Unable to send group message"
+          ),
+        }));
+      }
     } else if (activeContactId) {
+      const targetContactId = activeContactId;
       const payload = {
         from: currentUserId,
-        to: activeContactId,
+        to: targetContactId,
         message: trimmed,
       };
-      setDirectMessages((prev) => {
-        const history = prev[activeContactId] ?? [];
-        return {
+      const tempId = createTempMessageId();
+      setDirectMessages((prev) => ({
+        ...prev,
+        [targetContactId]: mergeMessages(
+          prev[targetContactId] ?? [],
+          createMessageFromPayload(payload, { id: tempId, optimistic: true })
+        ),
+      }));
+
+      try {
+        const response = await sendDirectMessageApi(payload);
+        if (response?.data) {
+          setDirectMessages((prev) => ({
+            ...prev,
+            [targetContactId]: replaceTempMessage(
+              prev[targetContactId] ?? [],
+              tempId,
+              response.data
+            ),
+          }));
+        }
+      } catch (error) {
+        setDirectMessages((prev) => ({
           ...prev,
-          [activeContactId]: [
-            ...history,
-            createMessageFromPayload(payload, { optimistic: true }),
-          ],
-        };
-      });
-      instance.emit(DIRECT_EVENTS.SEND, payload);
+          [targetContactId]: markMessageFailed(
+            prev[targetContactId] ?? [],
+            tempId,
+            error.message || "Unable to send direct message"
+          ),
+        }));
+      }
     }
 
     setMessageInput("");
@@ -469,11 +566,16 @@ export default function ChatPage() {
                     background: isSelf ? "#4c1d95" : "#1e1b4b",
                   }}
                 >
-                  <div style={styles.messageMeta}>
-                    <strong>{lookupName(message.from)}</strong>
-                    <span>{formatTime(message.timestamp)}</span>
-                    {message.optimistic && <em> sending...</em>}
-                  </div>
+                    <div style={styles.messageMeta}>
+                      <strong>{lookupName(message.from)}</strong>
+                      <span>{formatTime(message.timestamp)}</span>
+                      {message.optimistic && !message.failed && <em> sending...</em>}
+                      {message.failed && (
+                        <em style={styles.messageError}>
+                          {message.errorMessage ? `failed: ${message.errorMessage}` : "failed"}
+                        </em>
+                      )}
+                    </div>
                   <p style={styles.messageBody}>{message.message}</p>
                 </div>
               );
@@ -677,6 +779,10 @@ const styles = {
     display: "flex",
     gap: 8,
     alignItems: "center",
+  },
+  messageError: {
+    color: "#f87171",
+    fontStyle: "italic",
   },
   messageBody: {
     margin: 0,
