@@ -13,8 +13,8 @@ import groupAttachmentRoutes from "./routes/groupAttachmentRoutes.js";
 import { swaggerSpec, swaggerUiMiddleware } from "./swagger/swagger.js";
 
 import { createServer } from "http";
-import { Server } from "socket.io";
 import detectPort from "detect-port";
+import { initSocket } from "./socketManager.js";
 
 dotenv.config();
 
@@ -51,69 +51,7 @@ console.log("Swagger Docs available at /docs");
 const DEFAULT_PORT = Number(process.env.PORT) || 5000;
 
 const httpServer = createServer(app);
-
-const io = new Server(httpServer, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-  },
-});
-
-const getDirectRoomId = (userA, userB) => {
-  if (!userA || !userB) {
-    return null;
-  }
-
-  return [String(userA), String(userB)].sort().join("_");
-};
-
-io.on("connection", (socket) => {
-  console.log(`Socket connected: ${socket.id}`);
-
-  socket.on("join_direct_room", ({ userA, userB }) => {
-    const roomId = getDirectRoomId(userA, userB);
-
-    if (!roomId) {
-      return;
-    }
-
-    socket.join(roomId);
-    console.log(`Socket ${socket.id} joined direct room ${roomId}`);
-  });
-
-  socket.on("send_direct_message", ({ from, to, message }) => {
-    const roomId = getDirectRoomId(from, to);
-
-    if (!roomId) {
-      return;
-    }
-
-    io.to(roomId).emit("receive_direct_message", { from, to, message });
-  });
-
-  socket.on("join_group", (payload) => {
-    const groupId = typeof payload === "string" ? payload : payload?.groupId;
-
-    if (!groupId) {
-      return;
-    }
-
-    socket.join(groupId);
-    console.log(`Socket ${socket.id} joined group ${groupId}`);
-  });
-
-  socket.on("send_group_message", ({ groupId, from, message }) => {
-    if (!groupId) {
-      return;
-    }
-
-    io.to(groupId).emit("receive_group_message", { groupId, from, message });
-  });
-
-  socket.on("disconnect", () => {
-    console.log(`Socket disconnected: ${socket.id}`);
-  });
-});
+initSocket(httpServer);
 
 const startServer = async () => {
   try {
@@ -133,7 +71,4 @@ const startServer = async () => {
     process.exit(1);
   }
 };
-
 startServer();
-
-export { io };
