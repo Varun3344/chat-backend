@@ -1,0 +1,83 @@
+# --- Dependencies ---
+node_modules/
+
+# --- Next.js build output ---
+.next/
+out/
+dist/
+.npm/
+.npmrc
+
+# --- Production build ---
+build/
+
+# --- Environment variables (DO NOT COMMIT) ---
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Keep example env
+!.env.example
+
+# --- Logs ---
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+
+# --- IDE folders ---
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+.idea/
+*.swp
+
+# --- Testing ---
+coverage/
+.nyc_output/
+
+# --- TypeScript ---
+*.tsbuildinfo
+
+# --- Next.js Cache ---
+.next/cache/
+.cache/
+
+# --- Linting & Build Caches ---
+.eslintcache
+.stylelintcache
+
+# --- Storybook (if used) ---
+storybook-static/
+
+# --- Vercel ---
+.vercel/
+
+# --- Turbo Repo cache ---
+turbo/
+.turbo/
+
+# --- Sentry Release Files ---
+.sentry/
+
+# --- Images cache (Next.js >= 13) ---
+public/static/images/.cache/
+
+# --- Firebase ---
+.firebase/
+.firebaserc
+
+# --- Docker optional ---
+docker-data/
+
