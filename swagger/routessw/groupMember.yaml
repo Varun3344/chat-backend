@@ -1,0 +1,48 @@
+paths:
+  /chat/group/member/add:
+    post:
+      summary: Add member to group
+      tags: [Group Members]
+      parameters:
+        - in: header
+          name: x-api-key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                groupId:
+                  type: string
+                memberId:
+                  type: string
+      responses:
+        200:
+          description: Member added
+
+  /chat/group/member/remove:
+    post:
+      summary: Remove member from group
+      tags: [Group Members]
+      parameters:
+        - in: header
+          name: x-api-key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                groupId:
+                  type: string
+                memberId:
+                  type: string
+      responses:
+        200:
+          description: Member removed

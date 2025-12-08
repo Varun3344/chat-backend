@@ -1,0 +1,24 @@
+paths:
+  /chat/group/create:
+    post:
+      summary: Create new group
+      tags: [Group Create]
+      parameters:
+        - in: header
+          name: x-api-key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                groupName:
+                  type: string
+                createdBy:
+                  type: string
+      responses:
+        201:
+          description: Group created successfully

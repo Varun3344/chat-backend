@@ -1,0 +1,54 @@
+paths:
+  /chat/direct/messages/{messageId}:
+    delete:
+      summary: Delete direct message
+      tags: [Delete Message]
+      parameters:
+        - in: header
+          name: x-api-key
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: messageId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: string
+      responses:
+        200:
+          description: Direct message deleted
+
+  /chat/group/messages/{messageId}:
+    delete:
+      summary: Delete group message
+      tags: [Delete Message]
+      parameters:
+        - in: header
+          name: x-api-key
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: messageId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId:
+                  type: string
+      responses:
+        200:
+          description: Group message deleted

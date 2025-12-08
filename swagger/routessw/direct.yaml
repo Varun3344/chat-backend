@@ -1,0 +1,27 @@
+paths:
+  /chat/direct/send:
+    post:
+      summary: Send direct message
+      tags: [Direct Chat]
+      parameters:
+        - in: header
+          name: x-api-key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                from:
+                  type: string
+                to:
+                  type: string
+                message:
+                  type: string
+      responses:
+        200:
+          description: Message sent

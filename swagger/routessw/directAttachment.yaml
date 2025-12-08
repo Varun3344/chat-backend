@@ -1,0 +1,27 @@
+paths:
+  /chat/direct/attachment/send:
+    post:
+      summary: Send direct attachment
+      tags: [Direct Attachments]
+      parameters:
+        - in: header
+          name: x-api-key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                from:
+                  type: string
+                to:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+      responses:
+        200:
+          description: File sent

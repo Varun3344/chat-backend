@@ -1,0 +1,26 @@
+paths:
+  /chat/group/send:
+    post:
+      summary: Send group message
+      tags: [Group Chat]
+      parameters:
+        - in: header
+          name: x-api-key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                groupId:
+                  type: string
+                from:
+                  type: string
+                message:
+                  type: string
+      responses:
+        200:
+          description: Group message sent

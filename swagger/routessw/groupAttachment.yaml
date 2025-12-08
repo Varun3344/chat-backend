@@ -1,0 +1,27 @@
+paths:
+  /chat/group/attachment/send:
+    post:
+      summary: Send group attachment
+      tags: [Group Attachments]
+      parameters:
+        - in: header
+          name: x-api-key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                groupId:
+                  type: string
+                from:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+      responses:
+        200:
+          description: Group file sent
