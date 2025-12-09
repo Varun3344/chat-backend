@@ -468,9 +468,14 @@ export default function ChatPage() {
         ),
       }));
 
+      if (socketInstance) {
+        socketInstance.emit(GROUP_EVENTS.SEND, payload);
+      }
+
       try {
         const response = await sendGroupMessageApi({
           ...payload,
+          suppressRealtime: true,
         });
         if (response?.data) {
           setGroupMessages((prev) => ({
@@ -508,9 +513,14 @@ export default function ChatPage() {
         ),
       }));
 
+      if (socketInstance) {
+        socketInstance.emit(DIRECT_EVENTS.SEND, payload);
+      }
+
       try {
         const response = await sendDirectMessageApi({
           ...payload,
+          suppressRealtime: true,
         });
         if (response?.data) {
           setDirectMessages((prev) => ({
