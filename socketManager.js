@@ -80,7 +80,7 @@ export const initSocket = (httpServer) => {
     });
 
     socket.on("send_direct_message", ({ from, to, message }) => {
-      emitDirectMessageEvent({ from, to, message });
+      emitDirectMessageEvent({ from, to, message, senderSocketId: socket.id });
     });
 
     socket.on("join_group", (payload) => {
@@ -99,7 +99,9 @@ export const initSocket = (httpServer) => {
         return;
       }
 
-      ioInstance.to(groupId).emit("receive_group_message", { groupId, from, message });
+      ioInstance
+        .to(groupId)
+        .emit("receive_group_message", { groupId, from, message, senderSocketId: socket.id });
     });
 
     socket.on("sendMessage", (payload = {}) => {

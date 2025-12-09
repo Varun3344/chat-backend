@@ -252,9 +252,15 @@ export default function ChatPage() {
 
     const handleConnect = () => setConnectionState("connected");
     const handleDisconnect = () => setConnectionState("disconnected");
+    const handleConnectError = (error) => {
+      console.error("Socket connect error:", error);
+      setConnectionState("error");
+    };
 
     instance.on("connect", handleConnect);
     instance.on("disconnect", handleDisconnect);
+    instance.io?.on?.("error", handleConnectError);
+    instance.on("connect_error", handleConnectError);
 
     if (!instance.connected) {
       instance.connect();
@@ -267,6 +273,8 @@ export default function ChatPage() {
     return () => {
       instance.off("connect", handleConnect);
       instance.off("disconnect", handleDisconnect);
+      instance.off("connect_error", handleConnectError);
+      instance.io?.off?.("error", handleConnectError);
     };
   }, []);
 
@@ -283,7 +291,12 @@ export default function ChatPage() {
       ) {
         return;
       }
-      if (payload.from === currentUserId) {
+      const selfSocketId = socketRef.current?.id;
+      if (
+        payload.senderSocketId &&
+        payload.senderSocketId === selfSocketId &&
+        payload.from === currentUserId
+      ) {
         return;
       }
       const peerId =
@@ -302,7 +315,12 @@ export default function ChatPage() {
       if (!isMember) {
         return;
       }
-      if (payload.from === currentUserId) {
+      const selfSocketId = socketRef.current?.id;
+      if (
+        payload.senderSocketId &&
+        payload.senderSocketId === selfSocketId &&
+        payload.from === currentUserId
+      ) {
         return;
       }
       const normalized = createMessageFromPayload(payload);
@@ -451,6 +469,7 @@ export default function ChatPage() {
     if (socketInstance && socketInstance.disconnected) {
       socketInstance.connect();
     }
+    const socketIsConnected = Boolean(socketInstance && socketInstance.connected);
 
     if (activeRoster === "group" && activeGroupId) {
       const targetGroupId = activeGroupId;
@@ -468,14 +487,14 @@ export default function ChatPage() {
         ),
       }));
 
-      if (socketInstance) {
+      if (socketIsConnected) {
         socketInstance.emit(GROUP_EVENTS.SEND, payload);
       }
 
       try {
         const response = await sendGroupMessageApi({
           ...payload,
-          suppressRealtime: true,
+          suppressRealtime: socketIsConnected,
         });
         if (response?.data) {
           setGroupMessages((prev) => ({
@@ -513,14 +532,14 @@ export default function ChatPage() {
         ),
       }));
 
-      if (socketInstance) {
+      if (socketIsConnected) {
         socketInstance.emit(DIRECT_EVENTS.SEND, payload);
       }
 
       try {
         const response = await sendDirectMessageApi({
           ...payload,
-          suppressRealtime: true,
+          suppressRealtime: socketIsConnected,
         });
         if (response?.data) {
           setDirectMessages((prev) => ({
