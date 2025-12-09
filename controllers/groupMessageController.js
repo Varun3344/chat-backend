@@ -2,12 +2,16 @@ import { ObjectId } from "mongodb";
 import { getCollection } from "../config/db.js";
 import { emitGroupMessageEvent } from "../socketManager.js";
 
-const toObjectId = (id) => {
-  if (!id || !ObjectId.isValid(id)) {
+const normalizeGroupId = (rawId) => {
+  if (!rawId) {
     return null;
   }
 
-  return new ObjectId(id);
+  if (ObjectId.isValid(rawId)) {
+    return new ObjectId(rawId).toString();
+  }
+
+  return String(rawId);
 };
 
 export const sendGroupMessage = async (req, res) => {
@@ -20,9 +24,9 @@ export const sendGroupMessage = async (req, res) => {
     });
   }
 
-  const objectId = toObjectId(groupId);
+  const normalizedGroupId = normalizeGroupId(groupId);
 
-  if (!objectId) {
+  if (!normalizedGroupId) {
     return res.status(400).json({
       status: "error",
       message: "Invalid groupId",
@@ -31,17 +35,20 @@ export const sendGroupMessage = async (req, res) => {
 
   try {
     const groups = getCollection("groups");
-    const group = await groups.findOne({ _id: objectId });
+    if (ObjectId.isValid(groupId)) {
+      const objectId = new ObjectId(groupId);
+      const group = await groups.findOne({ _id: objectId });
 
-    if (!group) {
-      return res.status(404).json({
-        status: "error",
-        message: "Group not found",
-      });
+      if (!group) {
+        return res.status(404).json({
+          status: "error",
+          message: "Group not found",
+        });
+      }
     }
 
     const payload = {
-      groupId: objectId.toString(),
+      groupId: normalizedGroupId,
       from,
       message,
       createdAt: new Date(),
@@ -82,9 +89,9 @@ export const getGroupMessages = async (req, res) => {
     const page = Math.max(Number(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
 
-    const objectId = toObjectId(groupId);
+    const normalizedGroupId = normalizeGroupId(groupId);
 
-    if (!objectId) {
+    if (!normalizedGroupId) {
       return res.status(400).json({
         status: "error",
         message: "Invalid groupId",
@@ -92,7 +99,6 @@ export const getGroupMessages = async (req, res) => {
     }
 
     const skip = (page - 1) * limit;
-    const normalizedGroupId = objectId.toString();
 
     const messages = await getCollection("groupMessages")
       .find({ groupId: normalizedGroupId })
