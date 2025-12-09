@@ -1,16 +1,14 @@
 import swaggerUi, { JsonObject } from "swagger-ui-express";
 import yaml from "yamljs";
 import path from "path";
-import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
+// Load YAML straight from the project root so compiled builds (dist) still find the files.
+const swaggerRoutesDir = path.resolve(process.cwd(), "swagger", "routessw");
 const loadYaml = (fileName: string): JsonObject =>
-  yaml.load(path.join(__dirname, "routessw", fileName));
+  yaml.load(path.join(swaggerRoutesDir, fileName));
 
 const pathSpecs: JsonObject[] = [
   loadYaml("direct.yaml"),
