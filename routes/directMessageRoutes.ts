@@ -30,24 +30,50 @@ dotenv.config();
 
 const router = express.Router();
 
+const requireKeys = (label: string, ...keys: Array<string | undefined>): string[] => {
+  const values = keys.filter((key): key is string => Boolean(key));
+  if (values.length === 0) {
+    throw new Error(`Missing API key configuration for ${label}`);
+  }
+  return values;
+};
+
 // SEND DIRECT MESSAGE
 router.post(
   "/send",
-  verifyApiKey([process.env.API_KEY_DIRECT, process.env.API_KEY_ADMIN]),
+  verifyApiKey(
+    requireKeys(
+      "direct send",
+      process.env.API_KEY_DIRECT,
+      process.env.API_KEY_ADMIN
+    )
+  ),
   sendDirectMessage
 );
 
 // FETCH DIRECT CHAT (userA <--> userB)
 router.get(
   "/messages/:userA/:userB",
-  verifyApiKey([process.env.API_KEY_DIRECT_FETCH, process.env.API_KEY_ADMIN]),
+  verifyApiKey(
+    requireKeys(
+      "direct fetch",
+      process.env.API_KEY_DIRECT_FETCH,
+      process.env.API_KEY_ADMIN
+    )
+  ),
   getDirectMessages
 );
 
 // DELETE DIRECT MESSAGE
 router.delete(
   "/messages/:messageId",
-  verifyApiKey([process.env.API_KEY_DIRECT_DELETE, process.env.API_KEY_ADMIN]),
+  verifyApiKey(
+    requireKeys(
+      "direct delete",
+      process.env.API_KEY_DIRECT_DELETE,
+      process.env.API_KEY_ADMIN
+    )
+  ),
   deleteDirectMessage
 );
 

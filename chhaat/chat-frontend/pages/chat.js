@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { USERS } from "../data/dummyData";
 import socket, { getSocket } from "../utils/socket";
@@ -7,6 +7,8 @@ import {
   sendGroupMessageApi,
   fetchDirectMessagesApi,
   fetchGroupMessagesApi,
+  createGroupApi,
+  fetchUserGroupsApi,
 } from "../utils/api";
 
 const DIRECT_EVENTS = {
@@ -21,6 +23,7 @@ const GROUP_EVENTS = {
   LEAVE: "leave_group",
   SEND: "send_group_message",
   RECEIVE: "receive_group_message",
+  CREATED: "group_created",
 };
 
 const everyone = USERS.map((user) => user.id);
@@ -164,6 +167,33 @@ const mergePendingWithFetched = (existing = [], fetched = []) => {
   return [...fetched, ...pending];
 };
 
+const normalizeGroupRecord = (record = {}) => ({
+  id: record.id ?? record.groupId ?? record._id ?? record.name,
+  name: record.name ?? record.groupName ?? "Untitled group",
+  description: record.description ?? "Custom group",
+  members: Array.isArray(record.members) ? record.members : [],
+  createdBy: record.createdBy,
+  createdAt: record.createdAt,
+  optimistic: Boolean(record.optimistic),
+});
+
+const mergeServerGroupsWithOptimistic = (serverGroups = [], previous = []) => {
+  if (!previous || previous.length === 0) {
+    return serverGroups;
+  }
+  const optimisticGroups = previous.filter(
+    (group) =>
+      group?.optimistic &&
+      !serverGroups.some((serverGroup) => serverGroup.id === group.id)
+  );
+
+  if (optimisticGroups.length === 0) {
+    return serverGroups;
+  }
+
+  return [...serverGroups, ...optimisticGroups];
+};
+
 export default function ChatPage() {
   const router = useRouter();
   const [currentUserId, setCurrentUserId] = useState(null);
@@ -177,6 +207,15 @@ export default function ChatPage() {
   const [messageInput, setMessageInput] = useState("");
   const [connectionState, setConnectionState] = useState("connecting");
   const [isSocketReady, setIsSocketReady] = useState(false);
+  const [customGroups, setCustomGroups] = useState([]);
+  const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [selectedMemberIds, setSelectedMemberIds] = useState([]);
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
+  const [createGroupError, setCreateGroupError] = useState(null);
+  const [customGroupsError, setCustomGroupsError] = useState(null);
+  const [isLoadingGroups, setIsLoadingGroups] = useState(false);
+  const [isMemberListOpen, setIsMemberListOpen] = useState(false);
 
   const socketRef = useRef(socket);
 
@@ -213,15 +252,89 @@ export default function ChatPage() {
     });
   }, [contacts]);
 
+  const upsertCustomGroup = useCallback((incoming) => {
+    if (!incoming) return;
+    setCustomGroups((prev) => {
+      const normalizedId =
+        incoming.id ?? incoming.groupId ?? incoming._id ?? incoming.name;
+      if (!normalizedId) {
+        return prev;
+      }
+      const nextGroup = {
+        id: normalizedId,
+        name: incoming.name ?? incoming.groupName ?? "Untitled group",
+        description: incoming.description ?? "Custom group",
+        members: Array.isArray(incoming.members) ? incoming.members : [],
+        createdBy: incoming.createdBy,
+        createdAt: incoming.createdAt,
+        optimistic: Boolean(incoming.optimistic),
+      };
+      const index = prev.findIndex(
+        (group) =>
+          group.id === normalizedId ||
+          group.groupId === normalizedId ||
+          group.id === incoming.id ||
+          group.id === incoming.groupId
+      );
+      if (index === -1) {
+        return [...prev, nextGroup];
+      }
+      const updated = [...prev];
+      updated[index] = { ...updated[index], ...nextGroup };
+      return updated;
+    });
+  }, []);
+
+  const removeCustomGroup = useCallback((groupId) => {
+    if (!groupId) return;
+    setCustomGroups((prev) =>
+      prev.filter(
+        (group) => group.id !== groupId && group.groupId !== groupId
+      )
+    );
+  }, []);
+
+  const silentGroupRefresh = useCallback(async () => {
+    if (!currentUserId) {
+      return;
+    }
+    try {
+      const response = await fetchUserGroupsApi(currentUserId);
+      const records = response?.groups ?? response?.data ?? [];
+      const normalized = records.map(normalizeGroupRecord);
+      setCustomGroups((prev) =>
+        mergeServerGroupsWithOptimistic(normalized, prev)
+      );
+    } catch (error) {
+      console.error("Silent group refresh failed:", error);
+    }
+  }, [currentUserId]);
+
   const groups = useMemo(() => {
     if (!currentUserId) return [];
-    return DEFAULT_GROUPS.filter(
+    const defaultGroups = DEFAULT_GROUPS.filter(
       (group) =>
         !Array.isArray(group.members) ||
         group.members.length === 0 ||
         group.members.includes(currentUserId)
     );
-  }, [currentUserId]);
+
+    const dynamicGroups = customGroups
+      .filter(
+        (group) =>
+          !Array.isArray(group.members) ||
+          group.members.length === 0 ||
+          group.members.includes(currentUserId)
+      )
+      .map((group) => ({
+        ...group,
+        id: group.id ?? group.groupId ?? group._id ?? group.name,
+        name: group.name ?? group.groupName ?? "Untitled group",
+        description: group.description ?? "Custom group",
+      }));
+
+    return [...defaultGroups, ...dynamicGroups];
+  }, [currentUserId, customGroups]);
 
   useEffect(() => {
     if (groups.length === 0) {
@@ -243,6 +356,136 @@ export default function ChatPage() {
       setActiveRoster(groups.length > 0 ? "group" : "direct");
     }
   }, [activeRoster, contacts.length, groups.length]);
+
+  useEffect(() => {
+    setSelectedMemberIds([]);
+    setCreateGroupError(null);
+    setNewGroupName("");
+    setIsCreateGroupOpen(false);
+    setIsMemberListOpen(false);
+  }, [currentUserId]);
+
+  useEffect(() => {
+    setIsMemberListOpen(false);
+  }, [activeRoster, activeGroupId]);
+
+  useEffect(() => {
+    if (!currentUserId) {
+      setCustomGroups([]);
+      return;
+    }
+    let ignore = false;
+    const loadGroups = async () => {
+      setIsLoadingGroups(true);
+      setCustomGroupsError(null);
+      try {
+        const response = await fetchUserGroupsApi(currentUserId);
+        const records = response?.groups ?? response?.data ?? [];
+        if (!ignore) {
+          const normalized = records.map(normalizeGroupRecord);
+          setCustomGroups((prev) =>
+            mergeServerGroupsWithOptimistic(normalized, prev)
+          );
+        }
+      } catch (error) {
+        if (!ignore) {
+          setCustomGroupsError(error.message || "Unable to load groups");
+        }
+      } finally {
+        if (!ignore) {
+          setIsLoadingGroups(false);
+        }
+      }
+    };
+    loadGroups();
+    return () => {
+      ignore = true;
+    };
+  }, [currentUserId]);
+
+  const handleToggleMemberSelection = (memberId) => {
+    setSelectedMemberIds((prev) =>
+      prev.includes(memberId)
+        ? prev.filter((id) => id !== memberId)
+        : [...prev, memberId]
+    );
+  };
+
+  const handleCreateGroupSubmit = async (event) => {
+    event.preventDefault();
+    if (!currentUserId) return;
+    const trimmedName = newGroupName.trim();
+    if (!trimmedName) {
+      setCreateGroupError("Please provide a group name.");
+      return;
+    }
+
+    const allMembers = Array.from(
+      new Set([currentUserId, ...selectedMemberIds])
+    );
+
+    setIsCreatingGroup(true);
+    setCreateGroupError(null);
+
+    const tempId = `temp-group-${Date.now()}`;
+    const optimisticGroup = {
+      id: tempId,
+      name: trimmedName,
+      description: "Custom group",
+      members: allMembers,
+      createdBy: currentUserId,
+      createdAt: new Date().toISOString(),
+      optimistic: true,
+    };
+
+    upsertCustomGroup(optimisticGroup);
+    setActiveRoster("group");
+    setActiveGroupId(tempId);
+
+    try {
+      const response = await createGroupApi({
+        groupName: trimmedName,
+        createdBy: currentUserId,
+        members: allMembers,
+      });
+
+      const serverGroup = response?.group ?? {};
+      const normalizedId =
+        serverGroup?.id?.toString?.() ??
+        serverGroup?.groupId?.toString?.() ??
+        response?.groupId?.toString?.() ??
+        response?.data?.groupId?.toString?.() ??
+        response?.groupId ??
+        response?.data?.groupId ??
+        `group-${Date.now()}`;
+
+      const normalizedGroup = {
+        id: normalizedId,
+        name: serverGroup?.name ?? trimmedName,
+        description: serverGroup?.description ?? "Custom group",
+        members: Array.isArray(serverGroup?.members)
+          ? serverGroup.members
+          : allMembers,
+        createdBy: serverGroup?.createdBy ?? currentUserId,
+        createdAt: serverGroup?.createdAt ?? new Date().toISOString(),
+        optimistic: false,
+      };
+
+      removeCustomGroup(tempId);
+      upsertCustomGroup(normalizedGroup);
+      setActiveRoster("group");
+      setActiveGroupId(normalizedGroup.id);
+      setIsCreateGroupOpen(false);
+      setNewGroupName("");
+      setSelectedMemberIds([]);
+      silentGroupRefresh();
+    } catch (error) {
+      removeCustomGroup(tempId);
+      setCreateGroupError(error.message || "Unable to create group");
+    } finally {
+      setIsCreatingGroup(false);
+    }
+  };
 
   useEffect(() => {
     const instance = socketRef.current ?? getSocket();
@@ -330,14 +573,34 @@ export default function ChatPage() {
       }));
     };
 
+    const handleGroupCreated = (payload) => {
+      if (!payload) return;
+      const members = Array.isArray(payload.members) ? payload.members : [];
+      const isRelevant =
+        members.includes(currentUserId) || payload.createdBy === currentUserId;
+      if (!isRelevant) {
+        return;
+      }
+      upsertCustomGroup(payload);
+      const shouldRefresh =
+        payload.eventType && payload.eventType !== "created"
+          ? true
+          : payload.createdBy !== currentUserId;
+      if (shouldRefresh) {
+        silentGroupRefresh();
+      }
+    };
+
     instance.on(DIRECT_EVENTS.RECEIVE, handleDirectMessage);
     instance.on(GROUP_EVENTS.RECEIVE, handleGroupMessage);
+    instance.on(GROUP_EVENTS.CREATED, handleGroupCreated);
 
     return () => {
       instance.off(DIRECT_EVENTS.RECEIVE, handleDirectMessage);
       instance.off(GROUP_EVENTS.RECEIVE, handleGroupMessage);
+      instance.off(GROUP_EVENTS.CREATED, handleGroupCreated);
     };
-  }, [isSocketReady, currentUserId, groups]);
+  }, [isSocketReady, currentUserId, groups, upsertCustomGroup, silentGroupRefresh]);
 
   useEffect(() => {
     if (!isSocketReady || !currentUserId || contacts.length === 0) return;
@@ -571,6 +834,11 @@ export default function ChatPage() {
       ? groupMessages[activeGroupId] ?? []
       : directMessages[activeContactId] ?? [];
 
+  const activeGroupData = useMemo(() => {
+    if (activeRoster !== "group" || !activeGroupId) return null;
+    return groups.find((group) => group.id === activeGroupId) ?? null;
+  }, [activeRoster, activeGroupId, groups]);
+
   const roomLabel =
     activeRoster === "group"
       ? groups.find((group) => group.id === activeGroupId)?.name ?? "No group"
@@ -646,8 +914,22 @@ export default function ChatPage() {
           </button>
         </div>
 
-        <div style={styles.listHeading}>
-          {activeRoster === "group" ? "Group rooms" : "Direct chats"}
+        <div style={styles.listHeadingRow}>
+          <span style={styles.listHeading}>
+            {activeRoster === "group" ? "Group rooms" : "Direct chats"}
+          </span>
+          {activeRoster === "group" && (
+            <button
+              type="button"
+              style={styles.createGroupButton}
+              onClick={() => {
+                setIsCreateGroupOpen((prev) => !prev);
+                setCreateGroupError(null);
+              }}
+            >
+              {isCreateGroupOpen ? "Close" : "Create group"}
+            </button>
+          )}
         </div>
 
         <div style={styles.roomList}>
@@ -670,6 +952,11 @@ export default function ChatPage() {
                   <span style={styles.roomMeta}>
                     {group.members.length} members
                   </span>
+                  {group.createdBy && group.createdBy !== currentUserId && (
+                    <span style={styles.groupCreatorNote}>
+                      {lookupName(group.createdBy)} created this group and added you
+                    </span>
+                  )}
                 </button>
               ))
             : contacts.map((contact) => (
@@ -695,10 +982,51 @@ export default function ChatPage() {
               No groups available for this user. Add them to a group to start a room.
             </p>
           )}
+          {activeRoster === "group" && customGroupsError && (
+            <p style={styles.createGroupError}>{customGroupsError}</p>
+          )}
           {activeRoster === "direct" && contacts.length === 0 && (
             <p style={styles.helperText}>
               No teammates to chat with. Add more contacts to see them here.
             </p>
+          )}
+          {activeRoster === "group" && isCreateGroupOpen && (
+            <form style={styles.createGroupForm} onSubmit={handleCreateGroupSubmit}>
+              <label style={styles.createGroupLabel}>
+                Group name
+                <input
+                  style={styles.createGroupInput}
+                  value={newGroupName}
+                  onChange={(event) => setNewGroupName(event.target.value)}
+                  placeholder="e.g. Product Beta Crew"
+                />
+              </label>
+              <div style={styles.createGroupMembers}>
+                <p style={styles.createGroupHint}>Select members</p>
+                <div style={styles.createGroupMemberList}>
+                  {USERS.filter((user) => user.id !== currentUserId).map((user) => (
+                    <label key={user.id} style={styles.createGroupMemberItem}>
+                      <input
+                        type="checkbox"
+                        checked={selectedMemberIds.includes(user.id)}
+                        onChange={() => handleToggleMemberSelection(user.id)}
+                      />
+                      <span>{user.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              {createGroupError && (
+                <p style={styles.createGroupError}>{createGroupError}</p>
+              )}
+              <button
+                type="submit"
+                style={styles.createGroupSubmit}
+                disabled={isCreatingGroup}
+              >
+                {isCreatingGroup ? "Creating..." : "Create group"}
+              </button>
+            </form>
           )}
         </div>
       </aside>
@@ -708,11 +1036,54 @@ export default function ChatPage() {
           <div>
             <p style={styles.chatEyebrow}>Active room</p>
             <h2 style={styles.chatTitle}>{roomLabel}</h2>
+            {activeRoster === "group" && activeGroupData?.createdBy && (
+              <p style={styles.groupCreatedBy}>
+                Created by {lookupName(activeGroupData.createdBy)}
+              </p>
+            )}
           </div>
           <button style={styles.secondaryButton} onClick={() => router.push("/")}>
             Switch user
           </button>
         </header>
+
+        {activeRoster === "group" && activeGroupData && (
+          <div style={styles.memberToggleRow}>
+            <button
+              type="button"
+              style={styles.memberToggleButton}
+              onClick={() => setIsMemberListOpen((prev) => !prev)}
+            >
+              {isMemberListOpen ? "Hide members" : "Show members"} (
+              {activeGroupData.members?.length ?? 0})
+            </button>
+          </div>
+        )}
+
+        {activeRoster === "group" && isMemberListOpen && activeGroupData && (
+          <div style={styles.memberListPanel}>
+            {(activeGroupData.members ?? []).length === 0 ? (
+              <p style={styles.helperText}>No members added yet.</p>
+            ) : (
+              (activeGroupData.members ?? []).map((memberId) => {
+                const memberLabel = lookupName(memberId);
+                return (
+                  <div key={memberId} style={styles.memberListItem}>
+                    <span style={styles.memberAvatar}>
+                      {memberLabel?.charAt(0) ?? memberId?.charAt(0) ?? "?"}
+                    </span>
+                    <div>
+                      <strong>{memberLabel}</strong>
+                      {memberId === activeGroupData.createdBy && (
+                        <span style={styles.memberTag}>Creator</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
 
         <div style={styles.messagesPane}>
           {currentMessages.length === 0 ? (
@@ -857,6 +1228,21 @@ const styles = {
     textTransform: "uppercase",
     letterSpacing: 1,
   },
+  listHeadingRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  createGroupButton: {
+    borderRadius: 999,
+    border: "1px solid rgba(148,163,184,0.5)",
+    background: "transparent",
+    color: "#e2e8f0",
+    padding: "4px 12px",
+    cursor: "pointer",
+    fontSize: "0.85rem",
+  },
   roomList: {
     display: "flex",
     flexDirection: "column",
@@ -888,10 +1274,77 @@ const styles = {
     fontSize: "0.75rem",
     color: "#a5b4fc",
   },
+  groupCreatorNote: {
+    fontSize: "0.75rem",
+    color: "#fbbf24",
+  },
   helperText: {
     marginTop: 16,
     fontSize: "0.9rem",
     color: "#94a3b8",
+  },
+  createGroupForm: {
+    marginTop: 12,
+    padding: 16,
+    borderRadius: 14,
+    border: "1px solid rgba(148,163,184,0.3)",
+    background: "rgba(15,23,42,0.5)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+  },
+  createGroupLabel: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    fontSize: "0.85rem",
+    color: "#e2e8f0",
+  },
+  createGroupInput: {
+    borderRadius: 10,
+    border: "1px solid rgba(148,163,184,0.4)",
+    padding: "8px 10px",
+    background: "rgba(15,23,42,0.7)",
+    color: "#f8fafc",
+  },
+  createGroupMembers: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  createGroupHint: {
+    margin: 0,
+    fontSize: "0.8rem",
+    color: "#94a3b8",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  createGroupMemberList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    maxHeight: 160,
+    overflowY: "auto",
+  },
+  createGroupMemberItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: "0.85rem",
+  },
+  createGroupError: {
+    margin: 0,
+    color: "#f87171",
+    fontSize: "0.85rem",
+  },
+  createGroupSubmit: {
+    borderRadius: 999,
+    border: "none",
+    background: "#7c3aed",
+    color: "#fff",
+    padding: "10px 20px",
+    cursor: "pointer",
+    fontWeight: 600,
   },
   chatPane: {
     flex: 1,
@@ -914,6 +1367,53 @@ const styles = {
   },
   chatTitle: {
     margin: "4px 0 0",
+  },
+  groupCreatedBy: {
+    margin: "4px 0 0",
+    fontSize: "0.85rem",
+    color: "#a5b4fc",
+  },
+  memberToggleRow: {
+    marginTop: -12,
+    marginBottom: 8,
+  },
+  memberToggleButton: {
+    borderRadius: 999,
+    border: "1px solid rgba(148,163,184,0.5)",
+    background: "transparent",
+    color: "#e2e8f0",
+    padding: "4px 16px",
+    cursor: "pointer",
+    fontSize: "0.85rem",
+  },
+  memberListPanel: {
+    borderRadius: 14,
+    border: "1px solid rgba(148,163,184,0.3)",
+    background: "rgba(15,23,42,0.5)",
+    padding: 16,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  memberListItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+  },
+  memberAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: "50%",
+    background: "#1e1b4b",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontWeight: 600,
+  },
+  memberTag: {
+    marginLeft: 8,
+    fontSize: "0.75rem",
+    color: "#fbbf24",
   },
   messagesPane: {
     flex: 1,

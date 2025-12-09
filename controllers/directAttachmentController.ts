@@ -1,7 +1,27 @@
-import { ObjectId } from "mongodb";
+import { ObjectId, InsertOneResult, Document } from "mongodb";
+import { Request, Response } from "express";
+import type { Express } from "express";
 import { getCollection } from "../config/db.js";
 
-const buildAttachmentDocument = (from, file, extraFields = {}) => ({
+interface AttachmentDocument extends Document {
+  from: string;
+  type: "attachment";
+  fileName: string;
+  mimeType: string;
+  size: number;
+  fileBuffer: Buffer;
+  createdAt: Date;
+  to?: string;
+  groupId?: string;
+}
+
+type AttachmentRequest = Request & { file?: Express.Multer.File };
+
+const buildAttachmentDocument = (
+  from: string,
+  file: Express.Multer.File,
+  extraFields: Partial<AttachmentDocument> = {}
+): AttachmentDocument => ({
   from,
   type: "attachment",
   fileName: file.originalname,
@@ -12,7 +32,11 @@ const buildAttachmentDocument = (from, file, extraFields = {}) => ({
   ...extraFields,
 });
 
-const respondSuccess = (res, result, payload) => {
+const respondSuccess = (
+  res: Response,
+  result: InsertOneResult<AttachmentDocument>,
+  payload: AttachmentDocument
+) => {
   return res.status(201).json({
     status: "success",
     message: "Attachment sent successfully",
@@ -25,8 +49,8 @@ const respondSuccess = (res, result, payload) => {
   });
 };
 
-export const uploadDirectAttachment = async (req, res) => {
-  const { from, to } = req.body;
+export const uploadDirectAttachment = async (req: AttachmentRequest, res: Response) => {
+  const { from, to } = req.body as { from?: string; to?: string };
 
   if (!req.file) {
     return res.status(400).json({
@@ -44,7 +68,9 @@ export const uploadDirectAttachment = async (req, res) => {
 
   try {
     const payload = buildAttachmentDocument(from, req.file, { to });
-    const result = await getCollection("directMessages").insertOne(payload);
+    const result = await getCollection<AttachmentDocument>("directMessages").insertOne(
+      payload
+    );
 
     return respondSuccess(res, result, payload);
   } catch (error) {
@@ -56,8 +82,8 @@ export const uploadDirectAttachment = async (req, res) => {
   }
 };
 
-export const uploadGroupAttachment = async (req, res) => {
-  const { from, groupId } = req.body;
+export const uploadGroupAttachment = async (req: AttachmentRequest, res: Response) => {
+  const { from, groupId } = req.body as { from?: string; groupId?: string };
 
   if (!req.file) {
     return res.status(400).json({
@@ -95,7 +121,9 @@ export const uploadGroupAttachment = async (req, res) => {
       groupId: group._id.toString(),
     });
 
-    const result = await getCollection("groupMessages").insertOne(payload);
+    const result = await getCollection<AttachmentDocument>("groupMessages").insertOne(
+      payload
+    );
 
     return respondSuccess(res, result, payload);
   } catch (error) {

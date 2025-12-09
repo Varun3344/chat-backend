@@ -141,3 +141,41 @@ export const fetchGroupMessagesApi = ({ groupId, page = 1, limit = 50 }) => {
     apiKey,
   });
 };
+
+export const createGroupApi = ({ groupName, createdBy, members = [] }) => {
+  if (!groupName || !createdBy) {
+    return Promise.reject(
+      new Error("groupName and createdBy are required to create a group")
+    );
+  }
+
+  const apiKey = process.env.NEXT_PUBLIC_API_KEY_GROUP_CREATE;
+  if (!apiKey) {
+    return Promise.reject(
+      new Error("Missing NEXT_PUBLIC_API_KEY_GROUP_CREATE environment variable")
+    );
+  }
+
+  return jsonRequest("/chat/group/create", {
+    method: "POST",
+    apiKey,
+    body: JSON.stringify({ groupName, createdBy, members }),
+  });
+};
+
+export const fetchUserGroupsApi = (userId) => {
+  if (!userId) {
+    return Promise.reject(new Error("userId is required to fetch groups"));
+  }
+
+  const apiKey = process.env.NEXT_PUBLIC_API_KEY_GROUP_MEMBER;
+  if (!apiKey) {
+    return Promise.reject(
+      new Error("Missing NEXT_PUBLIC_API_KEY_GROUP_MEMBER environment variable")
+    );
+  }
+
+  return jsonRequest(`/chat/group/member/${userId}`, {
+    apiKey,
+  });
+};

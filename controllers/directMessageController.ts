@@ -1,10 +1,28 @@
-import { ObjectId } from "mongodb";
+import { ObjectId, InsertOneResult, Document } from "mongodb";
+import { Request, Response } from "express";
 import { getCollection } from "../config/db.js";
 import { emitDirectMessageEvent } from "../socketManager.js";
 
+interface DirectMessageRecord extends Document {
+  from: string;
+  to: string;
+  message: string;
+  createdAt: Date;
+}
+
+const parseNumber = (value: unknown, fallback: number): number => {
+  const parsed = Number(value);
+  return Number.isNaN(parsed) || parsed <= 0 ? fallback : parsed;
+};
+
 // --------------------- SEND 1-1 MESSAGE ---------------------
-export const sendDirectMessage = async (req, res) => {
-  const { from, to, message, suppressRealtime } = req.body;
+export const sendDirectMessage = async (req: Request, res: Response) => {
+  const { from, to, message, suppressRealtime } = req.body as {
+    from?: string;
+    to?: string;
+    message?: string;
+    suppressRealtime?: boolean;
+  };
 
   if (!from || !to || !message) {
     return res.status(400).json({
@@ -14,14 +32,16 @@ export const sendDirectMessage = async (req, res) => {
   }
 
   try {
-    const payload = {
+    const payload: DirectMessageRecord = {
       from,
       to,
       message,
       createdAt: new Date(),
     };
 
-    const result = await getCollection("directMessages").insertOne(payload);
+    const collection = getCollection<DirectMessageRecord>("directMessages");
+    const result: InsertOneResult<DirectMessageRecord> =
+      await collection.insertOne(payload);
     const insertedId = result.insertedId?.toString();
     const responsePayload = {
       id: insertedId,
@@ -33,7 +53,9 @@ export const sendDirectMessage = async (req, res) => {
       try {
         emitDirectMessageEvent(responsePayload);
       } catch (socketError) {
-        console.warn("Socket emit skipped:", socketError.message);
+        const messageText =
+          socketError instanceof Error ? socketError.message : "unknown error";
+        console.warn("Socket emit skipped:", messageText);
       }
     }
 
@@ -52,10 +74,10 @@ export const sendDirectMessage = async (req, res) => {
 };
 
 // --------------------- FETCH 1-1 CHAT MESSAGES ---------------------
-export const getDirectMessages = async (req, res) => {
-  const { userA, userB } = req.params;
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 20;
+export const getDirectMessages = async (req: Request, res: Response) => {
+  const { userA, userB } = req.params as { userA?: string; userB?: string };
+  const page = parseNumber(req.query.page, 1);
+  const limit = parseNumber(req.query.limit, 20);
 
   if (!userA || !userB) {
     return res.status(400).json({
@@ -67,7 +89,7 @@ export const getDirectMessages = async (req, res) => {
   try {
     const skip = (page - 1) * limit;
 
-    const messages = await getCollection("directMessages")
+    const messages = await getCollection<DirectMessageRecord>("directMessages")
       .find({
         $or: [
           { from: userA, to: userB },
@@ -94,10 +116,10 @@ export const getDirectMessages = async (req, res) => {
   }
 };
 // --------------------- DELETE 1-1 MESSAGE ---------------------
-export const deleteDirectMessage = async (req, res) => {
-  const { messageId } = req.params;
+export const deleteDirectMessage = async (req: Request, res: Response) => {
+  const { messageId } = req.params as { messageId?: string };
 
-  if (!ObjectId.isValid(messageId)) {
+  if (!messageId || !ObjectId.isValid(messageId)) {
     return res.status(400).json({
       status: "error",
       message: "Invalid messageId",

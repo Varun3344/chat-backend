@@ -1,8 +1,16 @@
-import { ObjectId } from "mongodb";
+import { ObjectId, InsertOneResult, Document } from "mongodb";
+import { Request, Response } from "express";
 import { getCollection } from "../config/db.js";
 import { emitGroupMessageEvent } from "../socketManager.js";
 
-const normalizeGroupId = (rawId) => {
+interface GroupMessageRecord extends Document {
+  groupId: string;
+  from: string;
+  message: string;
+  createdAt: Date;
+}
+
+const normalizeGroupId = (rawId?: string) => {
   if (!rawId) {
     return null;
   }
@@ -14,8 +22,32 @@ const normalizeGroupId = (rawId) => {
   return String(rawId);
 };
 
-export const sendGroupMessage = async (req, res) => {
-  const { groupId, from, message, suppressRealtime } = req.body;
+const toObjectId = (value?: string): ObjectId | null => {
+  try {
+    return value ? new ObjectId(value) : null;
+  } catch {
+    return null;
+  }
+};
+
+const parsePageParam = (value: unknown, fallback: number, max?: number): number => {
+  const parsed = Number(value);
+  if (Number.isNaN(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  if (max && parsed > max) {
+    return max;
+  }
+  return parsed;
+};
+
+export const sendGroupMessage = async (req: Request, res: Response) => {
+  const { groupId, from, message, suppressRealtime } = req.body as {
+    groupId?: string;
+    from?: string;
+    message?: string;
+    suppressRealtime?: boolean;
+  };
 
   if (!groupId || !from || !message) {
     return res.status(400).json({
@@ -47,14 +79,15 @@ export const sendGroupMessage = async (req, res) => {
       }
     }
 
-    const payload = {
+    const payload: GroupMessageRecord = {
       groupId: normalizedGroupId,
       from,
       message,
       createdAt: new Date(),
     };
 
-    const result = await getCollection("groupMessages").insertOne(payload);
+    const result: InsertOneResult<GroupMessageRecord> =
+      await getCollection<GroupMessageRecord>("groupMessages").insertOne(payload);
     const insertedId = result.insertedId?.toString();
     const responsePayload = {
       id: insertedId,
@@ -65,7 +98,9 @@ export const sendGroupMessage = async (req, res) => {
       try {
         emitGroupMessageEvent(payload.groupId, responsePayload);
       } catch (socketError) {
-        console.warn("Group socket emit skipped:", socketError.message);
+        const messageText =
+          socketError instanceof Error ? socketError.message : "unknown error";
+        console.warn("Group socket emit skipped:", messageText);
       }
     }
 
@@ -83,11 +118,11 @@ export const sendGroupMessage = async (req, res) => {
   }
 };
 
-export const getGroupMessages = async (req, res) => {
+export const getGroupMessages = async (req: Request, res: Response) => {
   try {
-    const { groupId } = req.params;
-    const page = Math.max(Number(req.query.page) || 1, 1);
-    const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
+    const { groupId } = req.params as { groupId?: string };
+    const page = parsePageParam(req.query.page, 1);
+    const limit = parsePageParam(req.query.limit, 30, 100);
 
     const normalizedGroupId = normalizeGroupId(groupId);
 
@@ -100,7 +135,7 @@ export const getGroupMessages = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
-    const messages = await getCollection("groupMessages")
+    const messages = await getCollection<GroupMessageRecord>("groupMessages")
       .find({ groupId: normalizedGroupId })
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -122,8 +157,8 @@ export const getGroupMessages = async (req, res) => {
   }
 };
 
-export const deleteGroupMessage = async (req, res) => {
-  const { messageId } = req.params;
+export const deleteGroupMessage = async (req: Request, res: Response) => {
+  const { messageId } = req.params as { messageId?: string };
 
   const objectId = toObjectId(messageId);
 

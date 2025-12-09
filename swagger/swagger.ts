@@ -1,4 +1,4 @@
-import swaggerUi from "swagger-ui-express";
+import swaggerUi, { JsonObject } from "swagger-ui-express";
 import yaml from "yamljs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -9,10 +9,10 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const loadYaml = (fileName) =>
+const loadYaml = (fileName: string): JsonObject =>
   yaml.load(path.join(__dirname, "routessw", fileName));
 
-const pathSpecs = [
+const pathSpecs: JsonObject[] = [
   loadYaml("direct.yaml"),
   loadYaml("directAttachment.yaml"),
   loadYaml("group.yaml"),
@@ -22,7 +22,7 @@ const pathSpecs = [
   loadYaml("delete.yaml"),
 ];
 
-const apiKeyTable = [
+const apiKeyTable: Array<{ label: string; value?: string }> = [
   { label: "Direct chat send", value: process.env.API_KEY_DIRECT },
   { label: "Direct chat fetch", value: process.env.API_KEY_DIRECT_FETCH },
   { label: "Direct attachment", value: process.env.API_KEY_DIRECT_ATTACHMENT },
@@ -43,7 +43,7 @@ const markdownKeyTable = [
   ),
 ].join("\n");
 
-export const swaggerSpec = {
+export const swaggerSpec: JsonObject = {
   openapi: "3.0.0",
   info: {
     title: "LawWorld Chat API",

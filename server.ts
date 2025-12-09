@@ -23,22 +23,39 @@ app.use(express.json());
 app.use(cors());
 connectDB();
 
+const gatherKeys = (label: string, ...keys: Array<string | undefined>): string[] => {
+  const values = keys.filter((key): key is string => Boolean(key));
+  if (values.length === 0) {
+    throw new Error(`Missing API key configuration for ${label}`);
+  }
+  return values;
+};
+
 // REST API ROUTES
 app.use("/chat/direct", directMessageRoutes);
 app.use("/chat/direct", directAttachmentRoutes);
 
 app.use(
   "/chat/group/create",
-  verifyApiKey([process.env.API_KEY_GROUP_CREATE, process.env.API_KEY_ADMIN]),
+  verifyApiKey(
+    gatherKeys(
+      "group create",
+      process.env.API_KEY_GROUP_CREATE,
+      process.env.API_KEY_ADMIN
+    )
+  ),
   groupCreateRoutes
 );
 
 app.use(
   "/chat/group/member",
-  verifyApiKey([
-    process.env.API_KEY_GROUP_MEMBER,
-    process.env.API_KEY_ADMIN,
-  ]),
+  verifyApiKey(
+    gatherKeys(
+      "group member",
+      process.env.API_KEY_GROUP_MEMBER,
+      process.env.API_KEY_ADMIN
+    )
+  ),
   groupMemberRoutes
 );
 
@@ -48,12 +65,12 @@ app.use("/docs", swaggerUiMiddleware.serve, swaggerUiMiddleware.setup(swaggerSpe
 
 console.log("Swagger Docs available at /docs");
 
-const DEFAULT_PORT = Number(process.env.PORT) || 5000;
+const DEFAULT_PORT = Number(process.env.PORT ?? 5000);
 
 const httpServer = createServer(app);
 initSocket(httpServer);
 
-const startServer = async () => {
+const startServer = async (): Promise<void> => {
   try {
     const availablePort = await detectPort(DEFAULT_PORT);
 
