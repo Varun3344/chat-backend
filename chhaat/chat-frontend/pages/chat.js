@@ -283,6 +283,9 @@ export default function ChatPage() {
       ) {
         return;
       }
+      if (payload.from === currentUserId) {
+        return;
+      }
       const peerId =
         payload.from === currentUserId ? payload.to : payload.from;
       if (!peerId) return;
@@ -297,6 +300,9 @@ export default function ChatPage() {
       if (!payload?.groupId) return;
       const isMember = groups.some((group) => group.id === payload.groupId);
       if (!isMember) {
+        return;
+      }
+      if (payload.from === currentUserId) {
         return;
       }
       const normalized = createMessageFromPayload(payload);
@@ -462,14 +468,9 @@ export default function ChatPage() {
         ),
       }));
 
-      if (socketInstance) {
-        socketInstance.emit(GROUP_EVENTS.SEND, payload);
-      }
-
       try {
         const response = await sendGroupMessageApi({
           ...payload,
-          suppressRealtime: true,
         });
         if (response?.data) {
           setGroupMessages((prev) => ({
@@ -507,14 +508,9 @@ export default function ChatPage() {
         ),
       }));
 
-      if (socketInstance) {
-        socketInstance.emit(DIRECT_EVENTS.SEND, payload);
-      }
-
       try {
         const response = await sendDirectMessageApi({
           ...payload,
-          suppressRealtime: true,
         });
         if (response?.data) {
           setDirectMessages((prev) => ({
