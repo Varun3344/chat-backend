@@ -88,3 +88,4 @@ function sendMessage(text) {
 4. Optionally use `npx socket.io-client` CLI or Postman’s WebSocket tab to test without a UI.
 
 Following the steps above ensures Socket.IO is installed, configured, and operating like a realtime chat system across devices.
+# chat-app-backend
