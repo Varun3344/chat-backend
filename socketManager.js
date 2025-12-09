@@ -10,6 +10,30 @@ export const getDirectRoomId = (userA, userB) => {
   return [String(userA), String(userB)].sort().join("_");
 };
 
+const getUserRoomId = (userId) => {
+  if (!userId) return null;
+  return `user:${String(userId)}`;
+};
+
+const emitToUserRooms = (rooms = [], eventName, payload) => {
+  if (!ioInstance) return;
+  const uniqueRooms = [...new Set(rooms.filter(Boolean))];
+  uniqueRooms.forEach((room) => {
+    ioInstance.to(room).emit(eventName, payload);
+  });
+};
+
+export const emitDirectMessageEvent = (payload) => {
+  if (!payload) return;
+  const rooms = [getUserRoomId(payload.from), getUserRoomId(payload.to)];
+  emitToUserRooms(rooms, "receive_direct_message", payload);
+};
+
+export const emitGroupMessageEvent = (groupId, payload) => {
+  if (!ioInstance || !groupId || !payload) return;
+  ioInstance.to(groupId).emit("receive_group_message", payload);
+};
+
 export const initSocket = (httpServer) => {
   if (ioInstance) {
     return ioInstance;
@@ -25,6 +49,25 @@ export const initSocket = (httpServer) => {
   ioInstance.on("connection", (socket) => {
     console.log(`Socket connected: ${socket.id}`);
 
+    const registerUser = (payload) => {
+      const userId =
+        typeof payload === "string" ? payload : payload?.userId ?? payload?.id;
+      const roomId = getUserRoomId(userId);
+      if (!roomId) {
+        return;
+      }
+
+      if (socket.data?.userRoomId && socket.data.userRoomId !== roomId) {
+        socket.leave(socket.data.userRoomId);
+      }
+
+      socket.join(roomId);
+      socket.data.userRoomId = roomId;
+      console.log(`Socket ${socket.id} registered user ${userId}`);
+    };
+
+    socket.on("register_user", registerUser);
+
     socket.on("join_direct_room", ({ userA, userB }) => {
       const roomId = getDirectRoomId(userA, userB);
 
@@ -37,13 +80,7 @@ export const initSocket = (httpServer) => {
     });
 
     socket.on("send_direct_message", ({ from, to, message }) => {
-      const roomId = getDirectRoomId(from, to);
-
-      if (!roomId) {
-        return;
-      }
-
-      ioInstance.to(roomId).emit("receive_direct_message", { from, to, message });
+      emitDirectMessageEvent({ from, to, message });
     });
 
     socket.on("join_group", (payload) => {
@@ -65,7 +102,26 @@ export const initSocket = (httpServer) => {
       ioInstance.to(groupId).emit("receive_group_message", { groupId, from, message });
     });
 
+    socket.on("sendMessage", (payload = {}) => {
+      if (!payload.cipherText) {
+        return;
+      }
+
+      const eventPayload = {
+        cipherText: payload.cipherText,
+        meta: payload.meta ?? {},
+        senderId: payload.senderId ?? socket.id,
+        createdAt: payload.createdAt ?? Date.now(),
+      };
+
+      ioInstance.emit("receiveMessage", eventPayload);
+    });
+
     socket.on("disconnect", () => {
+      const { userRoomId } = socket.data || {};
+      if (userRoomId) {
+        socket.leave(userRoomId);
+      }
       console.log(`Socket disconnected: ${socket.id}`);
     });
   });

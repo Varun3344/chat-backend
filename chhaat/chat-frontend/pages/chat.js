@@ -316,30 +316,38 @@ export default function ChatPage() {
   }, [isSocketReady, currentUserId, groups]);
 
   useEffect(() => {
-    if (!isSocketReady || !currentUserId || !activeContactId) return;
+    if (!isSocketReady || !currentUserId || contacts.length === 0) return;
     const instance = socketRef.current;
     if (!instance) return;
 
-    const payload = { userA: currentUserId, userB: activeContactId };
-    instance.emit(DIRECT_EVENTS.JOIN, payload);
+    const payloads = contacts.map((contact) => ({
+      userA: currentUserId,
+      userB: contact.id,
+    }));
+
+    payloads.forEach((payload) => instance.emit(DIRECT_EVENTS.JOIN, payload));
 
     return () => {
-      instance.emit(DIRECT_EVENTS.LEAVE, payload);
+      payloads.forEach((payload) => instance.emit(DIRECT_EVENTS.LEAVE, payload));
     };
-  }, [activeContactId, currentUserId, isSocketReady]);
+  }, [contacts, currentUserId, isSocketReady]);
 
   useEffect(() => {
-    if (!isSocketReady || !currentUserId || !activeGroupId) return;
+    if (!isSocketReady || !currentUserId || groups.length === 0) return;
     const instance = socketRef.current;
     if (!instance) return;
 
-    const payload = { groupId: activeGroupId, userId: currentUserId };
-    instance.emit(GROUP_EVENTS.JOIN, payload);
+    const payloads = groups.map((group) => ({
+      groupId: group.id,
+      userId: currentUserId,
+    }));
+
+    payloads.forEach((payload) => instance.emit(GROUP_EVENTS.JOIN, payload));
 
     return () => {
-      instance.emit(GROUP_EVENTS.LEAVE, payload);
+      payloads.forEach((payload) => instance.emit(GROUP_EVENTS.LEAVE, payload));
     };
-  }, [activeGroupId, currentUserId, isSocketReady]);
+  }, [groups, currentUserId, isSocketReady]);
 
   useEffect(() => {
     if (!isSocketReady || !currentUserId) return;

@@ -1,10 +1,10 @@
 import { ObjectId } from "mongodb";
 import { getCollection } from "../config/db.js";
-import { getDirectRoomId, getIO } from "../socketManager.js";
+import { emitDirectMessageEvent } from "../socketManager.js";
 
 // --------------------- SEND 1-1 MESSAGE ---------------------
 export const sendDirectMessage = async (req, res) => {
-  const { from, to, message } = req.body;
+  const { from, to, message, suppressRealtime } = req.body;
 
   if (!from || !to || !message) {
     return res.status(400).json({
@@ -29,15 +29,12 @@ export const sendDirectMessage = async (req, res) => {
     };
 
     // Let REST-originated messages appear instantly for connected sockets.
-    try {
-      const io = getIO();
-      const roomId = getDirectRoomId(from, to);
-
-      if (roomId) {
-        io.to(roomId).emit("receive_direct_message", responsePayload);
+    if (!suppressRealtime) {
+      try {
+        emitDirectMessageEvent(responsePayload);
+      } catch (socketError) {
+        console.warn("Socket emit skipped:", socketError.message);
       }
-    } catch (socketError) {
-      console.warn("Socket emit skipped:", socketError.message);
     }
 
     return res.status(201).json({

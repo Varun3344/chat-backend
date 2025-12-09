@@ -1,6 +1,6 @@
 import { ObjectId } from "mongodb";
 import { getCollection } from "../config/db.js";
-import { getIO } from "../socketManager.js";
+import { emitGroupMessageEvent } from "../socketManager.js";
 
 const toObjectId = (id) => {
   if (!id || !ObjectId.isValid(id)) {
@@ -11,7 +11,7 @@ const toObjectId = (id) => {
 };
 
 export const sendGroupMessage = async (req, res) => {
-  const { groupId, from, message } = req.body;
+  const { groupId, from, message, suppressRealtime } = req.body;
 
   if (!groupId || !from || !message) {
     return res.status(400).json({
@@ -54,11 +54,12 @@ export const sendGroupMessage = async (req, res) => {
       ...payload,
     };
 
-    try {
-      const io = getIO();
-      io.to(payload.groupId).emit("receive_group_message", responsePayload);
-    } catch (socketError) {
-      console.warn("Group socket emit skipped:", socketError.message);
+    if (!suppressRealtime) {
+      try {
+        emitGroupMessageEvent(payload.groupId, responsePayload);
+      } catch (socketError) {
+        console.warn("Group socket emit skipped:", socketError.message);
+      }
     }
 
     return res.status(201).json({
