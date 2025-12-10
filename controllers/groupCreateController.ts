@@ -107,6 +107,7 @@ export const createGroup = async (req: Request, res: Response) => {
         from: createdBy,
         message: summary,
         metadata: { eventType: "group_created" },
+        memberIds: safeMembers,
       }).catch((notificationError) => {
         const message =
           notificationError instanceof Error

@@ -2,6 +2,10 @@ import { ObjectId, InsertOneResult, Document } from "mongodb";
 import { Request, Response } from "express";
 import type { Express } from "express";
 import { getCollection } from "../config/db.js";
+import {
+  emitDirectAttachmentEvent,
+  emitGroupAttachmentEvent,
+} from "../socketManager.js";
 
 interface AttachmentDocument extends Document {
   from: string;
@@ -13,6 +17,7 @@ interface AttachmentDocument extends Document {
   createdAt: Date;
   to?: string;
   groupId?: string;
+  message?: string;
 }
 
 type AttachmentRequest = Request & { file?: Express.Multer.File };
@@ -50,7 +55,7 @@ const respondSuccess = (
 };
 
 export const uploadDirectAttachment = async (req: AttachmentRequest, res: Response) => {
-  const { from, to } = req.body as { from?: string; to?: string };
+  const { from, to, message } = req.body as { from?: string; to?: string; message?: string };
 
   if (!req.file) {
     return res.status(400).json({
@@ -67,10 +72,32 @@ export const uploadDirectAttachment = async (req: AttachmentRequest, res: Respon
   }
 
   try {
-    const payload = buildAttachmentDocument(from, req.file, { to });
+    const payload = buildAttachmentDocument(from, req.file, {
+      to,
+      message,
+    });
     const result = await getCollection<AttachmentDocument>("directMessages").insertOne(
       payload
     );
+
+    const eventPayload = {
+      id: result.insertedId?.toString(),
+      from,
+      to,
+      fileName: payload.fileName,
+      mimeType: payload.mimeType,
+      size: payload.size,
+      createdAt: payload.createdAt,
+      type: payload.type,
+      message,
+    };
+
+    try {
+      emitDirectAttachmentEvent(eventPayload);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "unknown error";
+      console.warn("Direct attachment socket emit skipped:", detail);
+    }
 
     return respondSuccess(res, result, payload);
   } catch (error) {
@@ -83,7 +110,11 @@ export const uploadDirectAttachment = async (req: AttachmentRequest, res: Respon
 };
 
 export const uploadGroupAttachment = async (req: AttachmentRequest, res: Response) => {
-  const { from, groupId } = req.body as { from?: string; groupId?: string };
+  const { from, groupId, message } = req.body as {
+    from?: string;
+    groupId?: string;
+    message?: string;
+  };
 
   if (!req.file) {
     return res.status(400).json({
@@ -108,7 +139,8 @@ export const uploadGroupAttachment = async (req: AttachmentRequest, res: Respons
 
   try {
     const groups = getCollection("groups");
-    const group = await groups.findOne({ _id: new ObjectId(groupId) });
+    const objectId = new ObjectId(groupId);
+    const group = await groups.findOne({ _id: objectId });
 
     if (!group) {
       return res.status(404).json({
@@ -119,11 +151,36 @@ export const uploadGroupAttachment = async (req: AttachmentRequest, res: Respons
 
     const payload = buildAttachmentDocument(from, req.file, {
       groupId: group._id.toString(),
+      message,
     });
 
     const result = await getCollection<AttachmentDocument>("groupMessages").insertOne(
       payload
     );
+
+    const memberIds = Array.isArray(group.members)
+      ? (group.members
+          .map((member) => member?.toString?.() ?? "")
+          .filter((value): value is string => Boolean(value)))
+      : [];
+    const eventPayload = {
+      id: result.insertedId?.toString(),
+      from,
+      groupId: payload.groupId,
+      fileName: payload.fileName,
+      mimeType: payload.mimeType,
+      size: payload.size,
+      createdAt: payload.createdAt,
+      type: payload.type,
+      message,
+    };
+
+    try {
+      emitGroupAttachmentEvent(payload.groupId!, eventPayload, memberIds);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "unknown error";
+      console.warn("Group attachment socket emit skipped:", detail);
+    }
 
     return respondSuccess(res, result, payload);
   } catch (error) {

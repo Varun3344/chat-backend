@@ -138,6 +138,7 @@ export const addMember = async (req: Request, res: Response) => {
           from: addedBy || memberId,
           message: summary,
           metadata: { eventType: "member_added", memberId },
+          memberIds: normalizedGroup.members,
         }).catch((notificationError) => {
           const message =
             notificationError instanceof Error
@@ -246,6 +247,7 @@ export const removeMember = async (req: Request, res: Response) => {
           from: removedBy || memberId,
           message: summary,
           metadata: { eventType: "member_removed", memberId },
+          memberIds: normalizedGroup.members,
         }).catch((notificationError) => {
           const message =
             notificationError instanceof Error

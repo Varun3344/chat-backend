@@ -67,6 +67,7 @@ export const sendGroupMessage = async (req: Request, res: Response) => {
 
   try {
     const groups = getCollection("groups");
+    let memberIds: string[] = [];
     if (ObjectId.isValid(groupId)) {
       const objectId = new ObjectId(groupId);
       const group = await groups.findOne({ _id: objectId });
@@ -77,6 +78,12 @@ export const sendGroupMessage = async (req: Request, res: Response) => {
           message: "Group not found",
         });
       }
+
+      memberIds = Array.isArray(group.members)
+        ? (group.members
+            .map((member) => member?.toString?.() ?? "")
+            .filter((value): value is string => Boolean(value)))
+        : [];
     }
 
     const payload: GroupMessageRecord = {
@@ -96,7 +103,7 @@ export const sendGroupMessage = async (req: Request, res: Response) => {
 
     if (!suppressRealtime) {
       try {
-        emitGroupMessageEvent(payload.groupId, responsePayload);
+        emitGroupMessageEvent(payload.groupId, responsePayload, memberIds);
       } catch (socketError) {
         const messageText =
           socketError instanceof Error ? socketError.message : "unknown error";

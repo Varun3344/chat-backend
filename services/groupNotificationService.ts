@@ -12,6 +12,7 @@ interface BroadcastOptions {
   from?: string;
   message: string;
   metadata?: Record<string, unknown>;
+  memberIds?: string[];
 }
 
 interface SystemMessageRecord extends Document {
@@ -33,6 +34,7 @@ export const broadcastGroupSystemMessage = async ({
   from = "system",
   message,
   metadata = {},
+  memberIds = [],
 }: BroadcastOptions): Promise<SystemMessageRecord & { id?: string }> => {
   const normalizedGroupId = normalizeGroupId(groupId);
   if (!normalizedGroupId || !message) {
@@ -58,7 +60,7 @@ export const broadcastGroupSystemMessage = async ({
   };
 
   try {
-    emitGroupMessageEvent(normalizedGroupId, payload);
+    emitGroupMessageEvent(normalizedGroupId, payload, memberIds);
   } catch (socketError) {
     const messageText =
       socketError instanceof Error ? socketError.message : "unknown error";
