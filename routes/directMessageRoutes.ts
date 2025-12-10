@@ -19,7 +19,7 @@
 
 import express from "express";
 import dotenv from "dotenv";
-import { verifyApiKey } from "../middleware/apiKeyAuth.js";
+import { verifyApiKey } from "./middleware/apiKeyAuth.js";
 import {
   sendDirectMessage,
   getDirectMessages,

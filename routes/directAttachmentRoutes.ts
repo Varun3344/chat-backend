@@ -1,7 +1,7 @@
 import express from "express";
 import multer from "multer";
 import dotenv from "dotenv";
-import { verifyApiKey } from "../middleware/apiKeyAuth.js";
+import { verifyApiKey } from "./middleware/apiKeyAuth.js";
 import { uploadDirectAttachment } from "../controllers/directAttachmentController.js";
 
 const router = express.Router();

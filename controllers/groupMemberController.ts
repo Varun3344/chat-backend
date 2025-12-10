@@ -101,7 +101,7 @@ export const addMember = async (req: Request, res: Response) => {
     const updatedGroup = await groups.findOneAndUpdate(
       { _id: objectId },
       { $addToSet: { members: memberId } } as unknown as UpdateFilter<GroupDocument>,
-      { returnDocument: "after" }
+      { returnDocument: "after", includeResultMetadata: true }
     );
     if (!updatedGroup || !updatedGroup.value) {
       return res.status(500).json({
@@ -209,7 +209,7 @@ export const removeMember = async (req: Request, res: Response) => {
     const updatedGroup = await groups.findOneAndUpdate(
       { _id: objectId },
       { $pull: { members: memberId } } as unknown as UpdateFilter<GroupDocument>,
-      { returnDocument: "after" }
+      { returnDocument: "after", includeResultMetadata: true }
     );
     if (!updatedGroup || !updatedGroup.value) {
       return res.status(500).json({

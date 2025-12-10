@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { verifyApiKey } from "./middleware/apiKeyAuth.js";
+import { verifyApiKey } from "./routes/middleware/apiKeyAuth.js";
 import { connectDB } from "./config/db.js";
 
 import directMessageRoutes from "./routes/directMessageRoutes.js";
