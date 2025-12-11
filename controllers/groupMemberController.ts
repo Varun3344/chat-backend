@@ -1,7 +1,10 @@
 import { ObjectId, WithId, Document, UpdateFilter } from "mongodb";
 import { Request, Response } from "express";
 import { getCollection } from "../config/db.js";
-import { emitGroupCreatedEvent } from "../socketManager.js";
+import {
+  emitGroupMemberAddedEvent,
+  emitGroupMemberRemovedEvent,
+} from "../socketManager.js";
 import { broadcastGroupSystemMessage } from "../services/groupNotificationService.js";
 
 interface GroupDocument extends Document {
@@ -114,11 +117,13 @@ export const addMember = async (req: Request, res: Response) => {
     if (normalizedGroup) {
       scheduleMicrotask(() => {
         try {
-          emitGroupCreatedEvent({
+          emitGroupMemberAddedEvent({
             ...normalizedGroup,
             eventType: "member_added",
             newlyAddedMemberId: memberId,
+            memberId,
             addedBy,
+            initiatedBy: addedBy || memberId,
           });
         } catch (socketError) {
           const message =
@@ -223,11 +228,13 @@ export const removeMember = async (req: Request, res: Response) => {
     if (normalizedGroup) {
       scheduleMicrotask(() => {
         try {
-          emitGroupCreatedEvent({
+          emitGroupMemberRemovedEvent({
             ...normalizedGroup,
             eventType: "member_removed",
             removedMemberId: memberId,
+            memberId,
             removedBy,
+            initiatedBy: removedBy || memberId,
           });
         } catch (socketError) {
           const message =

@@ -22,6 +22,9 @@ interface AttachmentDocument extends Document {
 
 type AttachmentRequest = Request & { file?: Express.Multer.File };
 
+const MAX_ATTACHMENT_SIZE_BYTES = 20 * 1024 * 1024;
+const ATTACHMENT_LIMIT_MESSAGE = "Attachment exceeds 20 MB limit";
+
 const buildAttachmentDocument = (
   from: string,
   file: Express.Multer.File,
@@ -61,6 +64,13 @@ export const uploadDirectAttachment = async (req: AttachmentRequest, res: Respon
     return res.status(400).json({
       status: "error",
       message: "Attachment file is required",
+    });
+  }
+
+  if (req.file.size > MAX_ATTACHMENT_SIZE_BYTES) {
+    return res.status(413).json({
+      status: "error",
+      message: ATTACHMENT_LIMIT_MESSAGE,
     });
   }
 
@@ -120,6 +130,13 @@ export const uploadGroupAttachment = async (req: AttachmentRequest, res: Respons
     return res.status(400).json({
       status: "error",
       message: "Attachment file is required",
+    });
+  }
+
+  if (req.file.size > MAX_ATTACHMENT_SIZE_BYTES) {
+    return res.status(413).json({
+      status: "error",
+      message: ATTACHMENT_LIMIT_MESSAGE,
     });
   }
 

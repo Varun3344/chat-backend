@@ -1,5 +1,6 @@
 import type { Server as HTTPServer } from "http";
 import { Server, Socket } from "socket.io";
+import { registerEncryptedMessageHandlers } from "./socketHandlers/encryptedMessages.js";
 
 interface DirectMessagePayload {
   from: string;
@@ -7,6 +8,7 @@ interface DirectMessagePayload {
   message: string;
   senderSocketId?: string;
   clientMessageId?: string;
+  presenceStatus?: PresenceStatus;
 }
 
 interface GroupMessagePayload {
@@ -16,6 +18,8 @@ interface GroupMessagePayload {
   senderSocketId?: string;
   clientMessageId?: string;
   system?: boolean;
+  presenceStatus?: PresenceStatus;
+  memberIds?: string[];
   [key: string]: unknown;
 }
 
@@ -25,6 +29,13 @@ interface GroupSocketPayload {
   name?: string;
   members?: string[];
   createdBy?: string;
+  description?: string;
+  initiatedBy?: string;
+  memberId?: string;
+  addedBy?: string;
+  removedBy?: string;
+  presenceStatus?: PresenceStatus;
+  eventType?: string;
   [key: string]: unknown;
 }
 
@@ -39,6 +50,7 @@ interface AttachmentSocketPayload {
   createdAt: Date | string | number;
   type: "attachment";
   message?: string;
+  presenceStatus?: PresenceStatus;
   [key: string]: unknown;
 }
 
@@ -72,9 +84,33 @@ interface SocketMeta {
 
 const GROUP_JOIN_EVENTS = ["join_group", "join_group_room"];
 const GROUP_LEAVE_EVENTS = ["leave_group", "leave_group_room"];
+const LEGACY_DIRECT_TYPING_EVENT = "direct_typing";
+const LEGACY_GROUP_TYPING_EVENT = "group_typing";
+const TYPING_EVENT = "typing";
+const GROUP_MESSAGE_EVENT = "group:message";
+const LEGACY_GROUP_MESSAGE_EVENT = "receive_group_message";
+const LEGACY_GROUP_ACTIVITY_EVENT = "group_created";
+const GROUP_CREATED_EVENT = "group:created";
+const GROUP_UPDATED_EVENT = "group:updated";
+const GROUP_MEMBER_ADDED_EVENT = "group:memberAdded";
+const GROUP_MEMBER_REMOVED_EVENT = "group:memberRemoved";
+const GROUP_EVENT_TYPE_LOOKUP: Record<string, string> = {
+  [GROUP_CREATED_EVENT]: "created",
+  [GROUP_UPDATED_EVENT]: "updated",
+  [GROUP_MEMBER_ADDED_EVENT]: "member_added",
+  [GROUP_MEMBER_REMOVED_EVENT]: "member_removed",
+};
 
 let ioInstance: Server | null = null;
 const userStates = new Map<string, UserRealtimeState>();
+
+const resolvePresenceStatus = (userId?: string | null): PresenceStatus => {
+  if (!userId) {
+    return "offline";
+  }
+  const normalizedId = String(userId);
+  return userStates.get(normalizedId)?.status ?? "offline";
+};
 
 export const getDirectRoomId = (
   userA?: string | number | null,
@@ -263,14 +299,22 @@ const trackGroupDelivery = (groupId: string, senderId: string | undefined, membe
 export const emitDirectMessageEvent = (payload: DirectMessagePayload): void => {
   if (!payload) return;
   const rooms = [getUserRoomId(payload.from), getUserRoomId(payload.to)];
-  emitToUserRooms(rooms, "receive_direct_message", payload);
+  const enrichedPayload: DirectMessagePayload = {
+    ...payload,
+    presenceStatus: payload.presenceStatus ?? resolvePresenceStatus(payload.from),
+  };
+  emitToUserRooms(rooms, "receive_direct_message", enrichedPayload);
   trackDirectDelivery(payload);
 };
 
 export const emitDirectAttachmentEvent = (payload: AttachmentSocketPayload): void => {
   if (!payload) return;
   const rooms = [getUserRoomId(payload.from), getUserRoomId(payload.to)];
-  emitToUserRooms(rooms, "direct_attachment_uploaded", payload);
+  const enrichedPayload: AttachmentSocketPayload = {
+    ...payload,
+    presenceStatus: payload.presenceStatus ?? resolvePresenceStatus(payload.from),
+  };
+  emitToUserRooms(rooms, "direct_attachment_uploaded", enrichedPayload);
   if (payload.to) {
     incrementDirectUnread(payload.to, payload.from);
   }
@@ -282,7 +326,12 @@ export const emitGroupMessageEvent = (
   memberIds: string[] = []
 ): void => {
   if (!ioInstance || !groupId || !payload) return;
-  ioInstance.to(groupId).emit("receive_group_message", payload);
+  const enrichedPayload: GroupMessagePayload = {
+    ...payload,
+    presenceStatus: payload.presenceStatus ?? resolvePresenceStatus(payload.from),
+  };
+  ioInstance.to(groupId).emit(GROUP_MESSAGE_EVENT, enrichedPayload);
+  ioInstance.to(groupId).emit(LEGACY_GROUP_MESSAGE_EVENT, enrichedPayload);
   trackGroupDelivery(groupId, payload.from, memberIds);
 };
 
@@ -292,18 +341,100 @@ export const emitGroupAttachmentEvent = (
   memberIds: string[] = []
 ): void => {
   if (!ioInstance || !groupId) return;
-  ioInstance.to(groupId).emit("group_attachment_uploaded", payload);
+  const enrichedPayload: AttachmentSocketPayload = {
+    ...payload,
+    presenceStatus: payload.presenceStatus ?? resolvePresenceStatus(payload.from),
+  };
+  ioInstance.to(groupId).emit("group_attachment_uploaded", enrichedPayload);
   trackGroupDelivery(groupId, payload.from, memberIds);
 };
 
-export const emitGroupCreatedEvent = (group: GroupSocketPayload): void => {
-  if (!group) return;
-  const members = sanitizeMemberIds(group.members ?? []);
-  const rooms = [
-    ...members.map((memberId) => getUserRoomId(memberId)),
-    getUserRoomId(group.createdBy),
+const emitGroupActivityEvent = (
+  eventName: string,
+  payload: GroupSocketPayload,
+  memberIds?: string[]
+): void => {
+  if (!payload) return;
+  const resolvedMembers =
+    memberIds && memberIds.length > 0
+      ? sanitizeMemberIds(memberIds)
+      : sanitizeMemberIds(payload.members ?? []);
+  const extras: Array<string | undefined> = [
+    payload.createdBy,
+    payload.initiatedBy,
+    payload.memberId,
+    payload.addedBy,
+    payload.removedBy,
   ];
-  emitToUserRooms(rooms, "group_created", group);
+  const rooms = [
+    ...resolvedMembers.map((memberId) => getUserRoomId(memberId)),
+    ...extras.map((memberId) => getUserRoomId(memberId)),
+  ]
+    .filter((roomId): roomId is string => Boolean(roomId));
+  if (rooms.length === 0) {
+    return;
+  }
+  const uniqueRooms = [...new Set(rooms)];
+  const eventType =
+    payload.eventType ?? GROUP_EVENT_TYPE_LOOKUP[eventName] ?? eventName;
+  const presenceStatus =
+    payload.presenceStatus ??
+    resolvePresenceStatus(
+      payload.initiatedBy ?? payload.addedBy ?? payload.removedBy ?? payload.createdBy
+    );
+  const enrichedPayload: GroupSocketPayload = {
+    ...payload,
+    eventType,
+    presenceStatus,
+  };
+  emitToUserRooms(uniqueRooms, eventName, enrichedPayload);
+  emitToUserRooms(uniqueRooms, LEGACY_GROUP_ACTIVITY_EVENT, enrichedPayload);
+};
+
+export const emitGroupCreatedEvent = (
+  group: GroupSocketPayload,
+  memberIds?: string[]
+): void => {
+  if (!group) return;
+  const payload: GroupSocketPayload = {
+    ...group,
+    initiatedBy: group.initiatedBy ?? group.createdBy,
+    eventType: group.eventType ?? GROUP_EVENT_TYPE_LOOKUP[GROUP_CREATED_EVENT],
+  };
+  emitGroupActivityEvent(GROUP_CREATED_EVENT, payload, memberIds);
+};
+
+export const emitGroupUpdatedEvent = (
+  group: GroupSocketPayload,
+  memberIds?: string[]
+): void => {
+  if (!group) return;
+  emitGroupActivityEvent(GROUP_UPDATED_EVENT, group, memberIds);
+};
+
+export const emitGroupMemberAddedEvent = (
+  group: GroupSocketPayload,
+  memberIds?: string[]
+): void => {
+  if (!group) return;
+  const payload: GroupSocketPayload = {
+    ...group,
+    eventType: group.eventType ?? GROUP_EVENT_TYPE_LOOKUP[GROUP_MEMBER_ADDED_EVENT],
+  };
+  emitGroupActivityEvent(GROUP_MEMBER_ADDED_EVENT, payload, memberIds);
+};
+
+export const emitGroupMemberRemovedEvent = (
+  group: GroupSocketPayload,
+  memberIds?: string[]
+): void => {
+  if (!group) return;
+  const payload: GroupSocketPayload = {
+    ...group,
+    eventType:
+      group.eventType ?? GROUP_EVENT_TYPE_LOOKUP[GROUP_MEMBER_REMOVED_EVENT],
+  };
+  emitGroupActivityEvent(GROUP_MEMBER_REMOVED_EVENT, payload, memberIds);
 };
 
 const registerUserFactory =
@@ -317,8 +448,16 @@ const registerUserFactory =
     }
 
     const data = (socket.data ?? {}) as SocketMeta;
+    const previousUserId = data.userId;
     if (data.userRoomId && data.userRoomId !== roomId) {
       socket.leave(data.userRoomId);
+    }
+    if (previousUserId && previousUserId !== userId) {
+      const previousState = getOrCreateUserState(previousUserId);
+      previousState.sockets.delete(socket.id);
+      if (previousState.sockets.size === 0) {
+        markUserOffline(previousUserId);
+      }
     }
 
     socket.join(roomId);
@@ -433,6 +572,78 @@ const handleGroupBlur = (socket: Socket) => {
   };
 };
 
+const handleGroupMessageSend =
+  (socket: Socket) =>
+  (payload: GroupMessagePayload & { memberIds?: string[] }) => {
+    if (!payload) {
+      return;
+    }
+    const { groupId, from, message, clientMessageId } = payload;
+    if (!groupId || !from || !message) {
+      return;
+    }
+    const memberIds = sanitizeMemberIds(
+      Array.isArray(payload.memberIds) ? payload.memberIds : []
+    );
+    emitGroupMessageEvent(
+      groupId,
+      {
+        groupId,
+        from,
+        message,
+        clientMessageId,
+        senderSocketId: socket.id,
+      },
+      memberIds
+    );
+  };
+
+const emitDirectTypingUpdate = ({
+  from,
+  to,
+  isTyping,
+}: {
+  from: string;
+  to: string;
+  isTyping: boolean;
+}) => {
+  const rooms = [getUserRoomId(to), getDirectRoomId(from, to)];
+  const payload = {
+    scope: "direct" as const,
+    from,
+    to,
+    isTyping,
+    timestamp: Date.now(),
+    presenceStatus: resolvePresenceStatus(from),
+  };
+  emitToUserRooms(rooms, TYPING_EVENT, payload);
+  emitToUserRooms(rooms, LEGACY_DIRECT_TYPING_EVENT, payload);
+};
+
+const emitGroupTypingUpdate = (
+  socket: Socket,
+  {
+    from,
+    groupId,
+    isTyping,
+  }: {
+    from: string;
+    groupId: string;
+    isTyping: boolean;
+  }
+) => {
+  const payload = {
+    scope: "group" as const,
+    from,
+    groupId,
+    isTyping,
+    timestamp: Date.now(),
+    presenceStatus: resolvePresenceStatus(from),
+  };
+  socket.to(groupId).emit(TYPING_EVENT, payload);
+  socket.to(groupId).emit(LEGACY_GROUP_TYPING_EVENT, payload);
+};
+
 const handleDirectTyping = (socket: Socket) => {
   return (payload: { from?: string; to?: string; isTyping?: boolean }) => {
     const from = payload.from ?? (socket.data as SocketMeta)?.userId;
@@ -440,11 +651,10 @@ const handleDirectTyping = (socket: Socket) => {
     if (!from || !to) {
       return;
     }
-    emitToUserRooms([getUserRoomId(to)], "direct_typing", {
+    emitDirectTypingUpdate({
       from,
       to,
       isTyping: Boolean(payload.isTyping),
-      timestamp: Date.now(),
     });
   };
 };
@@ -456,11 +666,47 @@ const handleGroupTyping = (socket: Socket) => {
     if (!groupId || !from || !ioInstance) {
       return;
     }
-    socket.to(groupId).emit("group_typing", {
+    emitGroupTypingUpdate(socket, {
       from,
       groupId,
       isTyping: Boolean(payload.isTyping),
-      timestamp: Date.now(),
+    });
+  };
+};
+
+const handleTypingEvent = (socket: Socket) => {
+  return (
+    payload: {
+      scope?: "direct" | "group";
+      from?: string;
+      to?: string;
+      groupId?: string;
+      isTyping?: boolean;
+    } = {}
+  ) => {
+    const scope = payload.scope ?? (payload.groupId ? "group" : "direct");
+    if (scope === "group") {
+      const from = payload.from ?? (socket.data as SocketMeta)?.userId;
+      const groupId = payload.groupId;
+      if (!groupId || !from) {
+        return;
+      }
+      emitGroupTypingUpdate(socket, {
+        from,
+        groupId,
+        isTyping: Boolean(payload.isTyping),
+      });
+      return;
+    }
+    const from = payload.from ?? (socket.data as SocketMeta)?.userId;
+    const to = payload.to;
+    if (!from || !to) {
+      return;
+    }
+    emitDirectTypingUpdate({
+      from,
+      to,
+      isTyping: Boolean(payload.isTyping),
     });
   };
 };
@@ -494,8 +740,9 @@ export const initSocket = (httpServer: HTTPServer): Server => {
     socket.on("focus_group_room", handleGroupFocus(socket));
     socket.on("blur_group_room", handleGroupBlur(socket));
 
-    socket.on("direct_typing", handleDirectTyping(socket));
-    socket.on("group_typing", handleGroupTyping(socket));
+    socket.on(TYPING_EVENT, handleTypingEvent(socket));
+    socket.on(LEGACY_DIRECT_TYPING_EVENT, handleDirectTyping(socket));
+    socket.on(LEGACY_GROUP_TYPING_EVENT, handleGroupTyping(socket));
 
     socket.on(
       "send_direct_message",
@@ -510,46 +757,11 @@ export const initSocket = (httpServer: HTTPServer): Server => {
       }
     );
 
-    socket.on(
-      "send_group_message",
-      ({ groupId, from, message, clientMessageId }: GroupMessagePayload) => {
-        if (!groupId) {
-          return;
-        }
-        ioInstance!
-          .to(groupId)
-          .emit("receive_group_message", {
-            groupId,
-            from,
-            message,
-            clientMessageId,
-            senderSocketId: socket.id,
-          });
-      }
-    );
+    const groupMessageHandler = handleGroupMessageSend(socket);
+    socket.on("send_group_message", groupMessageHandler);
+    socket.on(GROUP_MESSAGE_EVENT, groupMessageHandler);
 
-    socket.on(
-      "sendMessage",
-      (payload: {
-        cipherText?: string;
-        meta?: Record<string, unknown>;
-        senderId?: string;
-        createdAt?: number;
-      } = {}) => {
-        if (!payload.cipherText) {
-          return;
-        }
-
-        const eventPayload = {
-          cipherText: payload.cipherText,
-          meta: payload.meta ?? {},
-          senderId: payload.senderId ?? socket.id,
-          createdAt: payload.createdAt ?? Date.now(),
-        };
-
-        ioInstance!.emit("receiveMessage", eventPayload);
-      }
-    );
+    registerEncryptedMessageHandlers(socket, ioInstance!);
 
     socket.on("disconnect", () => {
       const data = (socket.data ?? {}) as SocketMeta;

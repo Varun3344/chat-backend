@@ -20,6 +20,7 @@ interface GroupPayload {
   createdAt: Date;
   description: string;
   eventType: string;
+  initiatedBy?: string;
   [key: string]: unknown;
 }
 
@@ -81,6 +82,7 @@ export const createGroup = async (req: Request, res: Response) => {
       createdAt: newGroup.createdAt,
       description: "Custom group",
       eventType: "created",
+      initiatedBy: createdBy,
     };
 
     scheduleMicrotask(() => {
